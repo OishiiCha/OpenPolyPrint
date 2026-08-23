@@ -1,0 +1,38 @@
+services:
+    openpolyprint:
+        image: ghcr.io/lucas/openpolyprint:latest-pi
+        container_name: openpolyprint
+        restart: always
+        build:
+            context: .
+            dockerfile: Dockerfile.pi
+
+        # host-mode networking is required for pppp communication with the printer
+        network_mode: host
+
+        environment:
+            - OPENPOLYPRINT_HOST=0.0.0.0
+            - OPENPOLYPRINT_PORT=8080
+            - OPENPOLYPRINT_DATA_DIR=/data
+
+        # Pi camera (libcamera/rpicam) + USB camera + GPIO access:
+        # - /dev:/dev gives the container the full host device tree
+        # - /run/udev (read-only) is the udev database libcamera uses
+        # - /sys/class/gpio and /sys/devices/platform/soc allow sysfs GPIO access
+        volumes:
+            - openpolyprint_data:/data
+            - /dev:/dev
+            - /run/udev:/run/udev:ro
+            - /sys/class/gpio:/sys/class/gpio
+            - /sys/devices/platform/soc:/sys/devices/platform/soc
+        device_cgroup_rules:
+            - "c 81:* rmw"
+            - "c 189:* rmw"
+            - "c 29:* rmw"
+            - "c 226:* rmw"
+        privileged: true
+
+        command: ["-addr", "0.0.0.0:8080"]
+
+volumes:
+    openpolyprint_data:

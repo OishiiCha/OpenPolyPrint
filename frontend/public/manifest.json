@@ -1,0 +1,17 @@
+{
+  "name": "OpenPolyPrint",
+  "short_name": "OpenPolyPrint",
+  "description": "Multi-vendor 3D printer control app",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

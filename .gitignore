@@ -1,0 +1,48 @@
+# Build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+/openpolyprint
+/openpolyprint-*
+/frontend/dist/
+
+# Vendored / sub-project
+/ankermake-m5-protocol/
+
+# Logs
+*.log
+
+# Runtime data and caches
+*.sqlite
+*.db
+/openpolyprint-data/
+/recordings/
+/videos/
+/gcode/
+thumb_*.jpg
+*.exe~
+
+# Personal / sensitive data
+*.gcode
+*.gcode.gz
+*.3mf
+*.stl
+login.json
+openpolyprint-config.json
+openpolyprint-offline-keys.json
+ankermake-m5-protocol/ankerctl/default.json
+
+# Recordings / streams
+*.h264
+*.mkv
+*.mp4
+*.avi
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

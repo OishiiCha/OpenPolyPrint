@@ -1,0 +1,38 @@
+services:
+    openpolyprint:
+        image: ghcr.io/lucas/openpolyprint:latest
+        container_name: openpolyprint
+        restart: always
+        build: .
+
+        # host-mode networking is required for pppp communication with the printer
+        network_mode: host
+
+        environment:
+            - OPENPOLYPRINT_HOST=0.0.0.0
+            - OPENPOLYPRINT_PORT=8080
+            - OPENPOLYPRINT_DATA_DIR=/data
+
+        volumes:
+            - openpolyprint_data:/data
+
+        # USB camera access: pass through all video devices and the USB bus
+        devices:
+            - /dev/video0:/dev/video0
+            - /dev/video1:/dev/video1
+            - /dev/video2:/dev/video2
+            - /dev/video3:/dev/video3
+            - /dev/video4:/dev/video4
+            - /dev/video5:/dev/video5
+            - /dev/video6:/dev/video6
+            - /dev/video7:/dev/video7
+            - /dev/bus/usb:/dev/bus/usb
+        device_cgroup_rules:
+            - "c 81:* rmw"
+            - "c 189:* rmw"
+        privileged: true
+
+        command: ["-addr", "0.0.0.0:8080"]
+
+volumes:
+    openpolyprint_data:

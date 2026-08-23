@@ -1,0 +1,28 @@
+# Build stage
+FROM golang:1.26-bookworm AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /openpolyprint ./cmd/openpolyprint
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /openpolyprint /usr/local/bin/openpolyprint
+
+RUN mkdir -p /data
+
+EXPOSE 8080
+
+ENTRYPOINT ["openpolyprint"]
+CMD ["-addr", "0.0.0.0:8080"]

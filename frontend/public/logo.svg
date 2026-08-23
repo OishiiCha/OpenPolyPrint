@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- O -->
+  <polygon
+    points="60,5 85.98,20 85.98,50 60,65 34.02,50 34.02,20"
+    fill="#4f46e5"
+  />
+  <text
+    x="60"
+    y="38"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
+    font-size="26"
+    font-weight="700"
+    fill="white"
+  >O</text>
+
+  <!-- P -->
+  <polygon
+    points="34,50 59.98,65 59.98,95 34,110 8.02,95 8.02,65"
+    fill="#22c55e"
+  />
+  <text
+    x="34"
+    y="83"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
+    font-size="26"
+    font-weight="700"
+    fill="white"
+  >P</text>
+
+  <!-- P -->
+  <polygon
+    points="86,50 111.98,65 111.98,95 86,110 60.02,95 60.02,65"
+    fill="#f59e0b"
+  />
+  <text
+    x="86"
+    y="83"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace"
+    font-size="26"
+    font-weight="700"
+    fill="white"
+  >P</text>
+</svg>
