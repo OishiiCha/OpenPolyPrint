@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type Rea
 import { Link, useParams } from 'react-router-dom'
 import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
 import { Switch } from '../components/Switch'
+import { BedPreview } from '../components/BedPreview'
+import { GCodePreview } from '../components/GCodePreview'
 import {
   Eye,
   EyeOff,
@@ -589,8 +591,8 @@ function LevelingView({ printer }: { printer: Printer }) {
 
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ 3d_bed_visualizer ]</h3>
-          <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-800">
-            <Layers className="mr-2 h-6 w-6" /> 3D bed preview placeholder
+          <div className="rounded-xl bg-slate-100 dark:bg-slate-800">
+            <BedPreview className="aspect-video rounded-xl" />
           </div>
         </Card>
       </div>
@@ -988,6 +990,18 @@ export function GCodeDetail() {
   const { id } = useParams<{ id: string }>()
   const { files, loading } = useGCodeFiles()
   const file = files?.find((f) => f.id === id)
+  const [content, setContent] = useState<string>('')
+  const [contentLoading, setContentLoading] = useState(false)
+
+  useEffect(() => {
+    if (!id) return
+    setContentLoading(true)
+    fetch(`/api/gcode/${encodeURIComponent(id)}`)
+      .then((res) => res.text())
+      .then((text) => setContent(text))
+      .catch((err) => console.error('failed to load gcode', err))
+      .finally(() => setContentLoading(false))
+  }, [id])
 
   if (loading) {
     return <p className="font-mono text-sm text-slate-500">loading file...</p>
@@ -1020,9 +1034,13 @@ export function GCodeDetail() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="col-span-2">
-          <div className="flex aspect-video w-full items-center justify-center rounded-none bg-slate-900 text-slate-400">
-            <Layers className="mr-2 h-6 w-6" /> 3D preview placeholder
-          </div>
+          {contentLoading ? (
+            <div className="flex aspect-video w-full items-center justify-center rounded-none bg-slate-900 text-slate-400">
+              <Layers className="mr-2 h-6 w-6" /> loading preview...
+            </div>
+          ) : (
+            <GCodePreview gcode={content} className="aspect-video rounded-none" />
+          )}
         </Card>
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-slate-100">File info</h3>

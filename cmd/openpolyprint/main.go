@@ -201,6 +201,26 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 	}
 }
 
+// findDistDir looks for a built frontend/frontend dist directory in multiple
+// likely locations: next to the binary, next to the binary's parent, and CWD.
+func findDistDir() string {
+	candidates := []string{}
+	if ex, err := os.Executable(); err == nil {
+		exDir := filepath.Dir(ex)
+		candidates = append(candidates,
+			filepath.Join(exDir, "frontend", "dist"),
+			filepath.Join(exDir, "..", "frontend", "dist"),
+		)
+	}
+	candidates = append(candidates, filepath.Join("frontend", "dist"))
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
+
 func main() {
 	var (
 		dataDir = flag.String("data-dir", "", "directory that holds ankerctl default.json (default: platform config dir/ankerctl)")
@@ -345,16 +365,25 @@ func main() {
 		}
 	})
 	mux.HandleFunc("/api/gcode/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-			return
-		}
 		id := r.PathValue("id")
-		if err := gcodeStore.Delete(id); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-			return
+		switch r.Method {
+		case http.MethodGet:
+			data, err := gcodeStore.Load(id)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write(data)
+		case http.MethodDelete:
+			if err := gcodeStore.Delete(id); err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
-		w.WriteHeader(http.StatusNoContent)
 	})
 	cameras.Mount(mux, cameraMgr)
 	pi.Mount(mux, piMgr)
@@ -805,8 +834,8 @@ func main() {
 	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile)
 
 	// Serve the built frontend if dist/ exists next to the binary.
-	dist := filepath.Join("frontend", "dist")
-	if _, err := os.Stat(dist); err == nil {
+	dist := findDistDir()
+	if dist != "" {
 		fs := http.FileServer(http.Dir(dist))
 		// /recordings is a React route, but /recordings/ is the static video file server;
 		// serve the SPA for the exact route so deep refresh works.

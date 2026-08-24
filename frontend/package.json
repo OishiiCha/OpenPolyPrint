@@ -20,9 +20,11 @@
     "vite": "^8.2.0"
   },
   "dependencies": {
+    "@types/three": "^0.185.4",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.2"
+    "react-router-dom": "^7.18.2",
+    "three": "^0.185.1"
   }
 }

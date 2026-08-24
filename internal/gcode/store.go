@@ -153,6 +153,21 @@ func (s *Store) Save(name, printerID string, r io.Reader) (File, error) {
 	return f, err
 }
 
+// Load reads a G-code file by id (filename).
+func (s *Store) Load(id string) ([]byte, error) {
+	name, err := url.PathUnescape(id)
+	if err != nil {
+		name = id
+	}
+	base := filepath.Base(name)
+	path := filepath.Join(s.dir, base)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+	return data, nil
+}
+
 // Delete removes a G-code file by id (filename).
 func (s *Store) Delete(id string) error {
 	name, err := url.PathUnescape(id)
