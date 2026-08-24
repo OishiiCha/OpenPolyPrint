@@ -1,0 +1,12 @@
+.git
+.github
+.gitignore
+*.md
+frontend/node_modules
+frontend/dist
+ankermake-m5-protocol
+openpolyprint
+openpolyprint.exe
+*.log
+recordings
+data
