@@ -2,18 +2,20 @@ package anker
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/config"
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/mqtt"
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/pppp"
+	"github.com/lucas/openpolyprint/internal/anker/proto/config"
+	"github.com/lucas/openpolyprint/internal/anker/proto/mqtt"
+	"github.com/lucas/openpolyprint/internal/anker/proto/pppp"
 	"github.com/lucas/openpolyprint/internal/printers"
 )
+
+//go:embed ankermake-mqtt.crt
+var caCert []byte
 
 // Driver implements the printers.Driver interface for AnkerMake M5 / M5C printers.
 type Driver struct {
@@ -106,12 +108,6 @@ func (d *Driver) Connect(ctx context.Context) error {
 }
 
 func (d *Driver) connectMQTT(ctx context.Context) error {
-	certPath := filepath.Join("ankermake-m5-protocol", "ssl", "ankermake-mqtt.crt")
-	caCert, err := os.ReadFile(certPath)
-	if err != nil {
-		return fmt.Errorf("read ca cert: %w", err)
-	}
-
 	client, err := mqtt.NewAnkerMQTTClient(
 		d.printer.SN,
 		d.account.MQTTUsername(),

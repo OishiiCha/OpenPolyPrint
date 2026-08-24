@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/config"
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/crypto"
+	"github.com/lucas/openpolyprint/internal/anker/proto/config"
+	"github.com/lucas/openpolyprint/internal/anker/proto/crypto"
 )
 
 // LoginResponse is the public result of an AnkerMake login or import operation.

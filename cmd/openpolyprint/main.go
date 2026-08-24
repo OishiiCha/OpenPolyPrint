@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ankermgmt/ankermake-m5-protocol-go/flagship/config"
 	"github.com/lucas/openpolyprint/internal/anker"
+	"github.com/lucas/openpolyprint/internal/anker/proto/config"
 	"github.com/lucas/openpolyprint/internal/cameras"
 	"github.com/lucas/openpolyprint/internal/gcode"
 	"github.com/lucas/openpolyprint/internal/history"

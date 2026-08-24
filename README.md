@@ -17,7 +17,7 @@ Multi-vendor 3D printer control built from the AnkerMake M5/M5C protocol stack. 
 
 ## Tech Stack
 
-- **Backend:** Go 1.26, standard `net/http` mux, `ankermake-m5-protocol-go` for Anker PPPP/MQTT.
+- **Backend:** Go 1.26, standard `net/http` mux, with the Anker protocol stack in `internal/anker/proto`.
 - **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, `lucide-react`, `react-router-dom`.
 - **Hardware (Pi):** `rpicam-apps` / `libcamera-apps`, `pigpiod`, GPIO via `sysfs` and udev.
 
