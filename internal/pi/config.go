@@ -24,6 +24,7 @@ type Settings struct {
 // DefaultSettings returns an empty default Settings struct.
 func DefaultSettings() Settings {
 	return Settings{
+		LightRelayGPIO:  17,
 		FilamentSensors: []FilamentSensor{},
 	}
 }

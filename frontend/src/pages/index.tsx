@@ -1545,8 +1545,6 @@ function CameraModal({
     }
   }
 
-  const canSubmit = Boolean(name && printerId)
-
   const previewUrl = useMemo(() => {
     if (type === 'usb') {
       const dev = usbDevices.find((d) => d.deviceId === selectedDevice)
@@ -1571,11 +1569,10 @@ function CameraModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="text"
-            placeholder="Camera name"
+            placeholder="Camera name *"
             value={name}
             onChange={(e) => setName(e.target.value)}
             className={inputClass}
-            required
           />
           <select
             value={printerId}
@@ -1707,7 +1704,7 @@ function CameraModal({
             <button type="button" onClick={onClose} className={ghostClass}>
               cancel
             </button>
-            <button type="submit" disabled={!canSubmit} className={btnClass}>
+            <button type="submit" className={btnClass}>
               {editing ? 'save' : 'add'}
             </button>
           </div>
