@@ -1402,7 +1402,7 @@ function CameraModal({
   printers: Printer[]
   open: boolean
   onClose: () => void
-  onSave: (camera: Camera) => void
+  onSave: (camera: Camera) => Promise<void>
   editing?: Camera | null
 }) {
   const [name, setName] = useState('')
@@ -1418,6 +1418,7 @@ function CameraModal({
   const [flip, setFlip] = useState('')
   const [sensor, setSensor] = useState('')
   const [loadingDevices, setLoadingDevices] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const inputClass =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
   const btnClass =
@@ -1467,6 +1468,7 @@ function CameraModal({
       setSensor(editing.sensor || '')
       setSelectedDevice(editing.deviceId || '')
       setSelectedMipi(editing.deviceId || '')
+      setError(null)
     } else if (open) {
       setName('')
       setPrinterId('unassigned')
@@ -1478,14 +1480,23 @@ function CameraModal({
       setSensor('')
       setSelectedDevice('')
       setSelectedMipi('')
+      setError(null)
     }
   }, [open, editing])
 
   if (!open) return null
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!name || !printerId) return
+    setError(null)
+    if (!name || !printerId) {
+      setError('Please enter a camera name and select a printer')
+      return
+    }
+    if ((type === 'usb' && !selectedDevice) || (type === 'mipi' && !selectedMipi)) {
+      setError('Please select a camera device')
+      return
+    }
     const base: Camera = {
       id: editing?.id || crypto.randomUUID(),
       name,
@@ -1514,29 +1525,25 @@ function CameraModal({
       base.sensor = dev.sensor
       base.url = `/api/cameras/mipi/preview?deviceId=${encodeURIComponent(dev.index)}&deviceLabel=${encodeURIComponent(dev.name)}&sensor=${encodeURIComponent(dev.sensor)}`
     }
-    onSave(base)
-    setName('')
-    setPrinterId('unassigned')
-    setUrl('')
-    setSelectedDevice('')
-    setSelectedMipi('')
-    setEnabled(true)
-    setBrightness(0)
-    setFlip('')
-    setSensor('')
-    setType('stream')
-    onClose()
+    try {
+      await onSave(base)
+      setName('')
+      setPrinterId('unassigned')
+      setUrl('')
+      setSelectedDevice('')
+      setSelectedMipi('')
+      setEnabled(true)
+      setBrightness(0)
+      setFlip('')
+      setSensor('')
+      setType('stream')
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to save camera')
+    }
   }
 
-  const canSubmit = editing
-    ? Boolean(name && printerId)
-    : type === 'stream'
-    ? Boolean(name && printerId)
-    : type === 'usb'
-    ? Boolean(name && printerId && selectedDevice)
-    : type === 'mipi'
-    ? Boolean(name && printerId && selectedMipi)
-    : false
+  const canSubmit = Boolean(name && printerId)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
@@ -1654,6 +1661,11 @@ function CameraModal({
             <option value="90">Rotate 90°</option>
             <option value="270">Rotate 270°</option>
           </select>
+          {error && (
+            <p className="rounded-lg border border-rose-600 bg-rose-950/30 p-3 font-mono text-sm text-rose-400">
+              {error}
+            </p>
+          )}
           <div className="flex justify-end gap-3">
             <button type="button" onClick={onClose} className={ghostClass}>
               cancel
@@ -1674,11 +1686,11 @@ export function Cameras() {
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<Camera | null>(null)
 
-  const handleSave = (camera: Camera) => {
+  const handleSave = async (camera: Camera) => {
     if (editing) {
-      updateCamera(camera)
+      await updateCamera(camera)
     } else {
-      addCamera(camera)
+      await addCamera(camera)
     }
   }
 
@@ -1759,7 +1771,7 @@ export function Cameras() {
         printers={printers}
         open={editing !== null}
         onClose={() => setEditing(null)}
-        onSave={(c) => { setEditing(null); updateCamera(c) }}
+        onSave={async (c) => { await updateCamera(c); setEditing(null) }}
         editing={editing}
       />
     </div>

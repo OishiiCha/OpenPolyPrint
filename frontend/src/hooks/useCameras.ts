@@ -92,15 +92,14 @@ export function useCameras() {
 
   const addCamera = useCallback(
     async (camera: Camera) => {
-      try {
-        const res = await fetch('/api/cameras', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fromCamera(camera)),
-        })
-        if (!res.ok) throw new Error('failed to add camera')
-      } catch (e) {
-        console.error(e)
+      const res = await fetch('/api/cameras', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fromCamera(camera)),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to add camera')
+        throw new Error(msg)
       }
       await fetchCameras()
     },
@@ -109,15 +108,14 @@ export function useCameras() {
 
   const updateCamera = useCallback(
     async (camera: Camera) => {
-      try {
-        const res = await fetch('/api/cameras', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(fromCamera(camera)),
-        })
-        if (!res.ok) throw new Error('failed to update camera')
-      } catch (e) {
-        console.error(e)
+      const res = await fetch('/api/cameras', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fromCamera(camera)),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to update camera')
+        throw new Error(msg)
       }
       await fetchCameras()
     },
