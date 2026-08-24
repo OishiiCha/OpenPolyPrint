@@ -241,11 +241,21 @@ func main() {
 		},
 	}
 
-	userConfigDir, err := os.UserConfigDir()
-	if err != nil {
-		log.Fatalf("user config dir: %v", err)
+	// OPENPOLYPRINT_DATA_DIR lets Docker/hosters keep config on a persistent
+	// volume (e.g. /data/openpolyprint) separate from the image/container.
+	var settingsDir string
+	if envDataDir := os.Getenv("OPENPOLYPRINT_DATA_DIR"); envDataDir != "" {
+		settingsDir = filepath.Join(envDataDir, "openpolyprint")
+		if *dataDir == "" {
+			*dataDir = filepath.Join(envDataDir, "ankerctl")
+		}
+	} else {
+		userConfigDir, err := os.UserConfigDir()
+		if err != nil {
+			log.Fatalf("user config dir: %v", err)
+		}
+		settingsDir = filepath.Join(userConfigDir, "openpolyprint")
 	}
-	settingsDir := filepath.Join(userConfigDir, "openpolyprint")
 	settingsFile := filepath.Join(settingsDir, "settings.json")
 	gcodeDir := filepath.Join(settingsDir, "gcode")
 

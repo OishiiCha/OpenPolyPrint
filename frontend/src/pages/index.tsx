@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
@@ -1420,6 +1420,7 @@ function CameraModal({
   const [sensor, setSensor] = useState('')
   const [loadingDevices, setLoadingDevices] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState(false)
   const inputClass =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
   const btnClass =
@@ -1546,6 +1547,20 @@ function CameraModal({
 
   const canSubmit = Boolean(name && printerId)
 
+  const previewUrl = useMemo(() => {
+    if (type === 'usb') {
+      const dev = usbDevices.find((d) => d.deviceId === selectedDevice)
+      if (!dev) return ''
+      return `/api/cameras/usb/preview?deviceId=${encodeURIComponent(dev.deviceId)}&deviceLabel=${encodeURIComponent(dev.deviceLabel)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
+    }
+    if (type === 'mipi') {
+      const dev = mipiDevices.find((d) => d.index === selectedMipi)
+      if (!dev) return ''
+      return `/api/cameras/mipi/preview?deviceId=${encodeURIComponent(dev.index)}&deviceLabel=${encodeURIComponent(dev.name)}&sensor=${encodeURIComponent(dev.sensor)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
+    }
+    return ''
+  }, [type, selectedDevice, usbDevices, selectedMipi, mipiDevices, flip, brightness])
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
@@ -1637,6 +1652,27 @@ function CameraModal({
               onChange={(e) => setSensor(e.target.value)}
               className={inputClass}
             />
+          )}
+          {(type === 'usb' || type === 'mipi') && (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+              <label className="mb-2 block font-mono text-xs text-slate-400">Preview</label>
+              {previewUrl ? (
+                <>
+                  <img
+                    src={previewUrl}
+                    alt="camera preview"
+                    className="aspect-video w-full rounded bg-slate-950 object-cover"
+                    onLoad={() => setPreviewError(false)}
+                    onError={() => setPreviewError(true)}
+                  />
+                  {previewError && (
+                    <p className="mt-2 font-mono text-xs text-rose-400">Preview failed to load</p>
+                  )}
+                </>
+              ) : (
+                <p className="font-mono text-sm text-slate-500">Select a device to see preview</p>
+              )}
+            </div>
           )}
           <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/50 p-3">
             <span className="font-mono text-sm text-slate-300">Enabled</span>
