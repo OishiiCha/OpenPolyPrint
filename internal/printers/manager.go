@@ -152,3 +152,23 @@ func (m *Manager) SendGCode(ctx context.Context, id string, command string) erro
 	}
 	return d.SendGCode(ctx, command)
 }
+
+// Add appends a new driver to the manager.
+func (m *Manager) Add(d Driver) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.drivers = append(m.drivers, d)
+}
+
+// Remove deletes a driver by ID and returns whether it was found.
+func (m *Manager) Remove(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, d := range m.drivers {
+		if d.PrinterID() == id {
+			m.drivers = append(m.drivers[:i], m.drivers[i+1:]...)
+			return true
+		}
+	}
+	return false
+}

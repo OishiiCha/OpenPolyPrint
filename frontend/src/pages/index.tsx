@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
 import { Switch } from '../components/Switch'
@@ -674,8 +673,8 @@ function GCodeView({ printer }: { printer: Printer }) {
 
 export function Printers() {
   const [selected, setSelected] = useState<Printer | null>(null)
-  const [loginOpen, setLoginOpen] = useState(false)
-  const { printers, loading, refresh } = usePrinters()
+  const [addOpen, setAddOpen] = useState(false)
+  const { printers, loading, addPrinter } = usePrinters()
 
   if (loading) {
     return (
@@ -692,7 +691,7 @@ export function Printers() {
         title="Printers"
         action={
           <button
-            onClick={() => setLoginOpen(true)}
+            onClick={() => setAddOpen(true)}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white shadow-sm hover:bg-blue-500"
           >
             <Plus className="h-4 w-4" /> add_printer
@@ -707,12 +706,10 @@ export function Printers() {
       </div>
 
       {selected && <PrinterModal printer={selected} onClose={() => setSelected(null)} />}
-      <AnkerLoginModal
-        open={loginOpen}
-        onClose={() => {
-          setLoginOpen(false)
-          refresh()
-        }}
+      <AddPrinterModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onAdd={addPrinter}
       />
     </div>
   )
@@ -1500,7 +1497,7 @@ function CameraModal({
       return
     }
     const base: Camera = {
-      id: editing?.id || crypto.randomUUID(),
+      id: editing?.id || `cam_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`,
       name,
       printerId,
       type,
@@ -1559,8 +1556,8 @@ function CameraModal({
     return ''
   }, [type, selectedDevice, usbDevices, selectedMipi, mipiDevices, flip, brightness])
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -1710,8 +1707,7 @@ function CameraModal({
           </div>
         </form>
       </div>
-    </div>,
-    document.body
+    </div>
   )
 }
 
@@ -1736,6 +1732,7 @@ export function Cameras() {
           title="Cameras"
           action={
             <button
+              type="button"
               onClick={() => setAddOpen(true)}
               className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500"
             >
@@ -1762,6 +1759,7 @@ export function Cameras() {
         title="Cameras"
         action={
           <button
+            type="button"
             onClick={() => setAddOpen(true)}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500"
           >
@@ -2417,6 +2415,123 @@ function AnkerLoginModal({ open, onClose }: { open: boolean; onClose: () => void
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function AddPrinterModal({
+  open,
+  onClose,
+  onAdd,
+}: {
+  open: boolean
+  onClose: () => void
+  onAdd: (printer: Partial<Printer> & { name: string; type: string; host?: string; apiKey?: string }) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [type, setType] = useState('klipper')
+  const [host, setHost] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const inputClass =
+    'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
+  const btnClass =
+    'rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white shadow-sm hover:bg-blue-500 disabled:opacity-50'
+  const ghostClass =
+    'rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700'
+
+  useEffect(() => {
+    if (open) {
+      setName('')
+      setType('klipper')
+      setHost('')
+      setApiKey('')
+      setError(null)
+      setSaving(false)
+    }
+  }, [open])
+
+  if (!open) return null
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (!name || !type) {
+      setError('Name and type are required')
+      return
+    }
+    setSaving(true)
+    try {
+      await onAdd({ name, type, host: host || undefined, apiKey: apiKey || undefined })
+      setName('')
+      setType('klipper')
+      setHost('')
+      setApiKey('')
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to add printer')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-4 font-mono text-xl font-semibold text-blue-400">[ add_printer ]</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Printer name *"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={inputClass}
+          />
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className={inputClass}
+          >
+            <option value="klipper">Klipper / Moonraker</option>
+            <option value="flashforge">FlashForge</option>
+            <option value="other">Other / Generic</option>
+          </select>
+          <input
+            type="text"
+            placeholder="Host / IP (optional)"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            className={inputClass}
+          />
+          <input
+            type="text"
+            placeholder="API key (optional)"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className={inputClass}
+          />
+          <p className="font-mono text-xs text-slate-500">
+            For AnkerMake printers, log in via Settings to auto-discover.
+          </p>
+          {error && (
+            <p className="rounded-lg border border-rose-600 bg-rose-950/30 p-3 font-mono text-sm text-rose-400">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={onClose} className={ghostClass}>
+              cancel
+            </button>
+            <button type="submit" disabled={saving} className={btnClass}>
+              {saving ? 'adding...' : 'add'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

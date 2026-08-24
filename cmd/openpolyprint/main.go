@@ -41,6 +41,8 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.base.RoundTrip(req)
 }
 
+var manualPrinters []printers.PrinterConfig
+
 func buildManager(cfg *config.Config) *printers.Manager {
 	var drivers []printers.Driver
 	if cfg != nil {
@@ -48,7 +50,34 @@ func buildManager(cfg *config.Config) *printers.Manager {
 			drivers = append(drivers, anker.NewDriver(p, cfg.Account))
 		}
 	}
+	for _, p := range manualPrinters {
+		drivers = append(drivers, printers.NewStaticDriver(p))
+	}
 	return printers.NewManager(drivers)
+}
+
+func loadManualPrinters(path string) []printers.PrinterConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []printers.PrinterConfig
+	if err := json.Unmarshal(data, &out); err != nil {
+		log.Printf("manual printers load: %v", err)
+		return nil
+	}
+	return out
+}
+
+func saveManualPrinters(path string, list []printers.PrinterConfig) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 // autoRecordConfig is the subset of settings used for automatic recording.
@@ -258,6 +287,7 @@ func main() {
 	}
 	settingsFile := filepath.Join(settingsDir, "settings.json")
 	gcodeDir := filepath.Join(settingsDir, "gcode")
+	manualPrinters = loadManualPrinters(filepath.Join(settingsDir, "printers.json"))
 
 	gcodeStore, err := gcode.NewStore(gcodeDir)
 	if err != nil {
@@ -660,7 +690,61 @@ func main() {
 	})
 	mux.HandleFunc("/api/printers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
+		case http.MethodPost:
+			var p printers.PrinterConfig
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if p.Name == "" || p.Type == "" {
+				http.Error(w, `{"error":"name and type required"}`, http.StatusBadRequest)
+				return
+			}
+			if p.ID == "" {
+				p.ID = fmt.Sprintf("printer_%d", time.Now().UnixNano())
+			}
+			manualPrinters = append(manualPrinters, p)
+			if err := saveManualPrinters(filepath.Join(settingsDir, "printers.json"), manualPrinters); err != nil {
+				log.Printf("save printers: %v", err)
+				http.Error(w, `{"error":"failed to save printer"}`, http.StatusInternalServerError)
+				return
+			}
+			mgr.Store(buildManager(cfg))
+			go mgr.Load().ConnectAll(context.Background())
+			_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/printers/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		found := false
+		for i, p := range manualPrinters {
+			if p.ID == id {
+				manualPrinters = append(manualPrinters[:i], manualPrinters[i+1:]...)
+				found = true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
+			return
+		}
+		if err := saveManualPrinters(filepath.Join(settingsDir, "printers.json"), manualPrinters); err != nil {
+			log.Printf("save printers: %v", err)
+			http.Error(w, `{"error":"failed to save printers"}`, http.StatusInternalServerError)
+			return
+		}
+		mgr.Store(buildManager(cfg))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 	mux.HandleFunc("/api/printers/{id}/status", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

@@ -29,6 +29,15 @@ type Status struct {
 	Error         string    `json:"error,omitempty"`
 }
 
+// PrinterConfig is the user-supplied configuration for a printer.
+type PrinterConfig struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Host   string `json:"host,omitempty"`
+	APIKey string `json:"apiKey,omitempty"`
+}
+
 // Driver is the common interface every printer provider must implement.
 type Driver interface {
 	PrinterID() string

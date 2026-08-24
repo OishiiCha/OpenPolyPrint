@@ -40,5 +40,33 @@ export function usePrinters() {
     return () => clearInterval(id)
   }, [refresh])
 
-  return { printers, loading, error, refresh }
+  const addPrinter = useCallback(
+    async (printer: Partial<Printer> & { type: string; name: string; host?: string; apiKey?: string }) => {
+      const res = await fetch('/api/printers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(printer),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to add printer')
+        throw new Error(msg)
+      }
+      refresh()
+    },
+    [refresh]
+  )
+
+  const removePrinter = useCallback(
+    async (id: string) => {
+      const res = await fetch(`/api/printers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to remove printer')
+        throw new Error(msg)
+      }
+      refresh()
+    },
+    [refresh]
+  )
+
+  return { printers, loading, error, refresh, addPrinter, removePrinter }
 }
