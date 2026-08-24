@@ -39,4 +39,9 @@ type Driver interface {
 	Status() (Status, error)
 	PausePrint(ctx context.Context) error
 	StopPrint(ctx context.Context) error
+	Home(ctx context.Context) error
+	Preheat(ctx context.Context, nozzle, bed float64) error
+	Cooldown(ctx context.Context) error
+	AutoLevel(ctx context.Context) error
+	SendGCode(ctx context.Context, command string) error
 }

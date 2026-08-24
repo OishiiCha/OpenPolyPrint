@@ -64,7 +64,7 @@ RUN printf '#!/bin/sh\npigpiod -l\nsleep 1\nexec "$@"\n' > /entrypoint.sh && chm
 RUN mkdir -p /data
 
 # Expose default web server port
-EXPOSE 8080
+EXPOSE 80
 
 ENTRYPOINT ["/entrypoint.sh", "openpolyprint"]
-CMD ["-addr", "0.0.0.0:8080"]
+CMD ["-addr", "0.0.0.0:80"]

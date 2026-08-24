@@ -240,9 +240,8 @@ func formatDurationSeconds(secs int64) string {
 	return fmt.Sprintf("%dm", m)
 }
 
-// sendPrintControl sends a pause/stop command via MQTT.
-// control: 0 = pause, 1 = resume, 2 = stop
-func (d *Driver) sendPrintControl(control int) error {
+// sendCommand builds and sends an MQTT command message.
+func (d *Driver) sendCommand(cmd mqtt.MqttMsgType, fields map[string]any) error {
 	if d.mqttClient == nil {
 		return errors.New("mqtt not available (offline or missing account)")
 	}
@@ -251,10 +250,11 @@ func (d *Driver) sendPrintControl(control int) error {
 	}
 
 	msg := map[string]any{
-		"command_type": "print_control",
-		"control":      control,
+		"commandType": int(cmd),
 	}
-
+	for k, v := range fields {
+		msg[k] = v
+	}
 	if err := d.mqttClient.Command(msg); err != nil {
 		return err
 	}
@@ -263,10 +263,38 @@ func (d *Driver) sendPrintControl(control int) error {
 
 // PausePrint pauses the active print.
 func (d *Driver) PausePrint(ctx context.Context) error {
-	return d.sendPrintControl(0)
+	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"value": 0})
 }
 
 // StopPrint stops the active print.
 func (d *Driver) StopPrint(ctx context.Context) error {
-	return d.sendPrintControl(2)
+	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"value": 2})
+}
+
+// Home homes all axes.
+func (d *Driver) Home(ctx context.Context) error {
+	return d.sendCommand(mqtt.CmdMoveZero, map[string]any{"value": 0})
+}
+
+// Preheat sets nozzle and bed target temperatures.
+func (d *Driver) Preheat(ctx context.Context, nozzle, bed float64) error {
+	return d.sendCommand(mqtt.CmdPreheatConfig, map[string]any{
+		"nozzle_temp": nozzle,
+		"bed_temp":    bed,
+	})
+}
+
+// Cooldown turns off heaters.
+func (d *Driver) Cooldown(ctx context.Context) error {
+	return d.Preheat(ctx, 0, 0)
+}
+
+// AutoLevel starts automatic bed leveling.
+func (d *Driver) AutoLevel(ctx context.Context) error {
+	return d.sendCommand(mqtt.CmdAutoLeveling, map[string]any{"value": 1})
+}
+
+// SendGCode sends one raw G-code line.
+func (d *Driver) SendGCode(ctx context.Context, command string) error {
+	return d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"command": command})
 }

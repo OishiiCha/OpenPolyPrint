@@ -12,7 +12,7 @@ services:
 
         environment:
             - OPENPOLYPRINT_HOST=0.0.0.0
-            - OPENPOLYPRINT_PORT=8080
+            - OPENPOLYPRINT_PORT=80
             - OPENPOLYPRINT_DATA_DIR=/data
 
         # Pi camera (libcamera/rpicam) + USB camera + GPIO access:
@@ -32,7 +32,7 @@ services:
             - "c 226:* rmw"
         privileged: true
 
-        command: ["-addr", "0.0.0.0:8080"]
+        command: ["-addr", "0.0.0.0:80"]
 
 volumes:
     openpolyprint_data:

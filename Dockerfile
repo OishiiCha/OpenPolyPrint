@@ -22,7 +22,7 @@ COPY --from=builder /openpolyprint /usr/local/bin/openpolyprint
 
 RUN mkdir -p /data
 
-EXPOSE 8080
+EXPOSE 80
 
 ENTRYPOINT ["openpolyprint"]
-CMD ["-addr", "0.0.0.0:8080"]
+CMD ["-addr", "0.0.0.0:80"]

@@ -433,7 +433,7 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
 
         <div className="flex-1 overflow-y-auto bg-slate-950 p-6">
           {tab === 'controls' && <ControlsView printer={printer} />}
-          {tab === 'leveling' && <LevelingView />}
+          {tab === 'leveling' && <LevelingView printer={printer} />}
           {tab === 'cameras' && <CamerasView cameras={cameras} />}
           {tab === 'gcode' && <GCodeView printer={printer} />}
         </div>
@@ -443,6 +443,25 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
 }
 
 function ControlsView({ printer }: { printer: Printer }) {
+  const post = async (path: string, body?: object) => {
+    try {
+      const res = await fetch(`/api/printers/${printer.id}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : 'Command failed')
+    }
+  }
+
+  const jog = (axis: string, distance: number, feed: number) => {
+    const gcode = `G91\nG0 ${axis}${distance} F${feed}\nG90`
+    post('/gcode', { command: gcode })
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2">
@@ -487,13 +506,22 @@ function ControlsView({ printer }: { printer: Printer }) {
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ macros ]</h3>
           <div className="grid grid-cols-3 gap-3">
-            <button className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+            <button
+              onClick={() => post('/home')}
+              className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
               <Home className="h-5 w-5" /> Home all
             </button>
-            <button className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+            <button
+              onClick={() => post('/preheat', { nozzle: 200, bed: 60 })}
+              className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
               <Flame className="h-5 w-5" /> Preheat
             </button>
-            <button className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">
+            <button
+              onClick={() => post('/cooldown')}
+              className="flex flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 px-3 py-3 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
               <Thermometer className="h-5 w-5" /> Cooldown
             </button>
           </div>
@@ -506,6 +534,13 @@ function ControlsView({ printer }: { printer: Printer }) {
           {['-X', '+X', '-Y', '+Y', '-Z', '+Z'].map((axis) => (
             <button
               key={axis}
+              onClick={() => {
+                const dir = axis[0] === '+' ? 1 : -1
+                const a = axis[1]
+                const dist = a === 'Z' ? 5 * dir : 10 * dir
+                const feed = a === 'Z' ? 600 : 3000
+                jog(a, dist, feed)
+              }}
               className="rounded-lg bg-slate-100 px-4 py-6 text-lg font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
             >
               {axis}
@@ -517,14 +552,27 @@ function ControlsView({ printer }: { printer: Printer }) {
   )
 }
 
-function LevelingView() {
+function LevelingView({ printer }: { printer: Printer }) {
+  const level = async () => {
+    try {
+      const res = await fetch(`/api/printers/${printer.id}/level`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : 'Command failed')
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ bed_level_helpers ]</h3>
           <div className="grid grid-cols-2 gap-3">
-            <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500">
+            <button
+              onClick={level}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+            >
               Auto bed level
             </button>
             <button className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">

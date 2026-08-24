@@ -107,3 +107,48 @@ func (m *Manager) StopPrint(ctx context.Context, id string) error {
 	}
 	return d.StopPrint(ctx)
 }
+
+// Home sends a home-all command to the requested printer.
+func (m *Manager) Home(ctx context.Context, id string) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.Home(ctx)
+}
+
+// Preheat sends a preheat command to the requested printer.
+func (m *Manager) Preheat(ctx context.Context, id string, nozzle, bed float64) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.Preheat(ctx, nozzle, bed)
+}
+
+// Cooldown sends a cooldown command to the requested printer.
+func (m *Manager) Cooldown(ctx context.Context, id string) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.Cooldown(ctx)
+}
+
+// AutoLevel sends an auto bed-leveling command to the requested printer.
+func (m *Manager) AutoLevel(ctx context.Context, id string) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.AutoLevel(ctx)
+}
+
+// SendGCode sends a raw G-code line to the requested printer.
+func (m *Manager) SendGCode(ctx context.Context, id string, command string) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.SendGCode(ctx, command)
+}

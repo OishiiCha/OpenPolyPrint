@@ -38,10 +38,10 @@ npm run build
 ### Run
 
 ```bash
-./openpolyprint -addr :8080
+./openpolyprint -addr :80
 ```
 
-The server serves the built frontend from `frontend/dist/`. Open http://localhost:8080.
+The server serves the built frontend from `frontend/dist/`. Open http://localhost.
 
 ### Development
 
@@ -72,13 +72,13 @@ Settings are stored in the platform config directory (`~/.config/openpolyprint` 
 
 CLI flags:
 
-- `-addr` — HTTP listen address (default `:8080`)
+- `-addr` — HTTP listen address (default `:80`)
 - `-data-dir` — optional Anker config data directory
 
 Environment variables used by the Docker compose files:
 
 - `OPENPOLYPRINT_HOST` — bind host, e.g. `0.0.0.0`
-- `OPENPOLYPRINT_PORT` — bind port, e.g. `8080`
+- `OPENPOLYPRINT_PORT` — bind port, e.g. `80`
 - `OPENPOLYPRINT_DATA_DIR` — runtime data directory, e.g. `/data`
 
 ## Lint / CI
