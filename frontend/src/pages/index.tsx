@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
 import { Switch } from '../components/Switch'
@@ -1545,7 +1546,7 @@ function CameraModal({
 
   const canSubmit = Boolean(name && printerId)
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
@@ -1676,7 +1677,8 @@ function CameraModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
