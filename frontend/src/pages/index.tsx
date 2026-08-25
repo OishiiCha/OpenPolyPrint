@@ -4043,6 +4043,7 @@ export function Pi() {
       setReadings(data.sensors || [])
       setStatus({
         gpioAvailable: data.gpioAvailable,
+        gpioBackend: data.gpioBackend,
         os: data.os,
         lightRelayEnabled: data.lightRelayEnabled,
         lightRelayGpio: data.lightRelayGpio,
@@ -4138,7 +4139,7 @@ export function Pi() {
       />
       {status && (
         <p className="font-mono text-sm text-slate-500">
-          GPIO {status.gpioAvailable ? 'available' : 'not available'} · {status.os} · sensor manager {status.sensorManagerRunning ? 'running' : 'stopped'}
+          GPIO {status.gpioAvailable ? `available (${status.gpioBackend || 'unknown'})` : 'not available'} · {status.os} · sensor manager {status.sensorManagerRunning ? 'running' : 'stopped'}
         </p>
       )}
       <div className="grid gap-6 lg:grid-cols-2">

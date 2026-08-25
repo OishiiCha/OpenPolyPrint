@@ -16,7 +16,8 @@ services:
             - OPENPOLYPRINT_DATA_DIR=/data
 
         # Pi camera (libcamera/rpicam) + USB camera + GPIO access:
-        # - /dev:/dev gives the container the full host device tree
+        # - /dev:/dev gives the container the full host device tree (includes
+        #   /dev/gpiomem and /dev/gpiochip0 for GPIO access)
         # - /run/udev (read-only) is the udev database libcamera uses
         # - /sys/class/gpio and /sys/devices/platform/soc allow sysfs GPIO access
         volumes:
@@ -30,6 +31,7 @@ services:
             - "c 189:* rmw"
             - "c 29:* rmw"
             - "c 226:* rmw"
+            - "c 254:* rmw"
         privileged: true
 
         command: ["-addr", "0.0.0.0:80"]

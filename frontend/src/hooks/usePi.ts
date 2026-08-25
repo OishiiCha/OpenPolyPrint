@@ -20,6 +20,7 @@ export interface PiReadings {
   lightRelayGpio: number
   lightRelayOn: boolean
   gpioAvailable: boolean
+  gpioBackend: string
   sensorManagerRunning: boolean
   os: string
 }
@@ -39,6 +40,7 @@ export function usePiReadings() {
         lightRelayGpio: data.lightRelayGpio ?? 0,
         lightRelayOn: data.lightRelayOn ?? false,
         gpioAvailable: data.gpioAvailable ?? false,
+        gpioBackend: data.gpioBackend ?? 'none',
         sensorManagerRunning: data.sensorManagerRunning ?? false,
         os: data.os ?? '',
       })

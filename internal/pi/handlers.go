@@ -97,6 +97,7 @@ func handlePiSettingsGet(w http.ResponseWriter, r *http.Request, m *ManagerGroup
 		"filamentSensors":      pi.FilamentSensors,
 		"sensorManagerRunning": m.Sensors.IsRunning(),
 		"gpioAvailable":        m.GPIO.IsAvailable(),
+		"gpioBackend":          m.GPIO.BackendName(),
 		"os":                   runtime.GOOS,
 	})
 }

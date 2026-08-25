@@ -57,6 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-lgpio \
     pigpiod \
     pigpio \
+    libgpiod2 \
     && pip3 install --no-cache-dir --break-system-packages pigpio && \
     pip3 download --no-cache-dir --no-deps --no-binary :all: Adafruit_DHT -d /tmp/dht && \
     cd /tmp/dht && tar xf *.tar.gz && cd Adafruit_DHT-* && \
@@ -70,7 +71,19 @@ COPY --from=builder /openpolyprint /usr/local/bin/openpolyprint
 COPY --from=frontend /app/dist ./frontend/dist
 
 # Entrypoint script starts pigpiod then runs openpolyprint
-RUN printf '#!/bin/sh\npigpiod -l\nsleep 1\nexec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+RUN printf '#!/bin/sh\n\
+# Start pigpiod if the device exists; retry a few times\n\
+if [ -e /dev/gpiomem ] || ls /dev/gpiochip* 2>/dev/null; then\n\
+  pigpiod -l 2>/dev/null\n\
+  sleep 0.5\n\
+  # Verify pigpiod is responding\n\
+  if ! pigs pigpv 2>/dev/null; then\n\
+    echo "[entrypoint] pigpiod not responding, GPIO will use libgpiod/sysfs fallback"\n\
+  fi\n\
+else\n\
+  echo "[entrypoint] no GPIO devices found, GPIO disabled"\n\
+fi\n\
+exec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Create data directory for recordings and gcode files (mounted as volume in docker-compose)
 RUN mkdir -p /data
