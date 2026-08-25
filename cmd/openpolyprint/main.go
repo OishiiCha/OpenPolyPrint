@@ -1757,17 +1757,26 @@ func main() {
 		tlsAddr := *addr
 
 		certDir := filepath.Join(settingsDir, "tls")
-		certPath, keyPath, regenerated, err := tlsautocert.EnsureCertificate(certDir)
+		certPath, keyPath, caCertPath, regenerated, err := tlsautocert.EnsureCertificate(certDir)
 		if err != nil {
 			log.Printf("[tls] failed to generate certificate, HTTPS disabled: %v", err)
 		} else {
 			if regenerated {
-				log.Printf("[tls] certificate ready at %s (includes hostname + local IPs)", certPath)
+				log.Printf("[tls] certificate ready at %s (signed by local CA: %s)", certPath, caCertPath)
 			}
+
+			// Endpoint to download the CA certificate for browser/system trust
+			mux.HandleFunc("/api/tls/ca", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/x-pem-file")
+				w.Header().Set("Content-Disposition", "attachment; filename=openpolyprint-ca.pem")
+				http.ServeFile(w, r, caCertPath)
+			})
+
 			tlsServer = &http.Server{Addr: tlsAddr, Handler: mux}
 			go func() {
 				fmt.Printf("OpenPolyPrint listening on https://localhost%s\n", tlsAddr)
-				fmt.Printf("  self-signed certificate — browser will show a security warning (this is normal for local HTTPS)\n")
+				fmt.Printf("  self-signed certificate — install the CA to trust it:\n")
+				fmt.Printf("    download: http://localhost/api/tls/ca\n")
 				if err := tlsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
 					log.Fatalf("[https] server on %s: %v", tlsAddr, err)
 				}

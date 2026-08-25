@@ -45,21 +45,18 @@ The server serves the built frontend from `frontend/dist/`. It listens on both:
 - **HTTP** on port `80` → http://localhost
 - **HTTPS** on port `443` → https://localhost
 
-HTTPS uses an auto-generated self-signed certificate that includes the
-machine's hostname and all local IP addresses as SANs, so you can access
-it via `https://<hostname>` or `https://<ip>` from any device on the
-network. The browser will show a security warning — this is normal for
-self-signed certificates. Click "Advanced" → "Proceed" to continue.
+HTTPS uses a local CA to sign the server certificate (like mkcert).
+To remove browser security warnings, install the CA certificate:
 
-To disable HTTPS and use plain HTTP only:
+1. Download the CA cert from `http://localhost/api/tls/ca` (or the Settings page)
+2. Install it in your system/browser trust store:
+   - **Windows:** Double-click `openpolyprint-ca.pem` → "Install Certificate" → "Local Machine" → "Place all certificates in: Trusted Root Certification Authorities"
+   - **macOS:** Double-click → Keychain Access → Find "OpenPolyPrint Local CA" → Right-click → "Get Info" → Trust → "Always Trust"
+   - **Linux:** `sudo cp openpolyprint-ca.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates`
 
-```bash
-./openpolyprint -tls=false -addr :80
-```
-
-The certificate is stored in `<settings-dir>/tls/cert.pem` and `key.pem`.
-It is valid for 1 year and auto-regenerated on startup if expired or if
-the hostname/IP addresses have changed.
+The CA is stored in `<settings-dir>/tls/ca.pem` (valid 10 years).
+The server certificate is stored in `cert.pem` and `key.pem` (valid 1 year).
+Both are auto-regenerated on startup if expired or if the hostname/IP addresses have changed.
 
 ### Development
 

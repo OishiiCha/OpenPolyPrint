@@ -3602,6 +3602,29 @@ export function Settings() {
           </div>
         </Card>
         <Card>
+          <h3 className="mb-2 font-semibold text-slate-900 dark:text-white">HTTPS / TLS Certificate</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            The server uses a local CA to sign its HTTPS certificate. To remove
+            browser security warnings, download the CA certificate and install it
+            in your system or browser trust store.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/api/tls/ca"
+              download="openpolyprint-ca.pem"
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+            >
+              Download CA certificate
+            </a>
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+            <p className="font-semibold text-slate-600 dark:text-slate-300">Install instructions:</p>
+            <p><strong>Windows:</strong> Double-click the .pem file → "Install Certificate" → "Local Machine" → "Place all certificates in: Trusted Root Certification Authorities"</p>
+            <p><strong>macOS:</strong> Double-click → Keychain Access → Find "OpenPolyPrint Local CA" → Right-click → "Get Info" → Trust → "Always Trust"</p>
+            <p><strong>Linux:</strong> <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">sudo cp openpolyprint-ca.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates</code></p>
+          </div>
+        </Card>
+        <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the OctoPrint API,
