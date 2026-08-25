@@ -49,7 +49,7 @@ const statusAccent: Record<string, string> = {
   Heating: '#f43f5e',
 }
 
-const resultColor = {
+const resultColor: Record<string, string> = {
   Success: 'text-emerald-600 dark:text-emerald-400',
   Failed: 'text-rose-600 dark:text-rose-400',
   Cancelled: 'text-amber-600 dark:text-amber-400',
@@ -124,6 +124,59 @@ function ConfirmModal({
   )
 }
 
+function PrinterGCodePreview({ fileName }: { fileName: string }) {
+  const [gcode, setGcode] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const listRes = await fetch('/api/gcode')
+        if (!listRes.ok) { if (!cancelled) setError(true); return }
+        const files = await listRes.json()
+        const match = (Array.isArray(files) ? files : []).find(
+          (f: any) => f.name === fileName || f.name === fileName + '.gcode' || fileName.endsWith(f.name)
+        )
+        if (!match) { if (!cancelled) { setError(true); setLoading(false) }; return }
+        const contentRes = await fetch(`/api/gcode/${encodeURIComponent(match.id)}`)
+        if (!contentRes.ok) { if (!cancelled) setError(true); return }
+        const text = await contentRes.text()
+        if (!cancelled) { setGcode(text); setLoading(false) }
+      } catch {
+        if (!cancelled) { setError(true); setLoading(false) }
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [fileName])
+
+  if (loading) {
+    return (
+      <div className="mt-4 h-40 rounded-lg border border-slate-700 bg-slate-950 flex items-center justify-center">
+        <p className="font-mono text-xs text-slate-500">loading gcode preview...</p>
+      </div>
+    )
+  }
+
+  if (error || !gcode) {
+    return null
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center gap-2">
+        <FileCode2 className="h-3.5 w-3.5 text-purple-400" />
+        <span className="font-mono text-xs text-slate-400">gcode preview</span>
+      </div>
+      <div className="h-48 rounded-lg border border-slate-700 overflow-hidden">
+        <GCodePreview gcode={gcode} className="w-full h-full" />
+      </div>
+    </div>
+  )
+}
+
 function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => void }) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
@@ -193,6 +246,10 @@ function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => voi
               {printer.progress}%
             </p>
           </div>
+        )}
+
+        {printer.status === 'Printing' && printer.currentFile && (
+          <PrinterGCodePreview fileName={printer.currentFile} />
         )}
 
         <div className="mt-5 flex gap-2">
@@ -915,7 +972,7 @@ export function GCode() {
             <select
               value={selectedPrinter}
               onChange={(e) => setSelectedPrinter(e.target.value)}
-              className={inputClass}
+              className="w-auto max-w-[12rem] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
             >
               <option value="unassigned">Unassigned</option>
               {printers.map((p) => (
@@ -1483,6 +1540,20 @@ function CameraModal({
     }
   }, [open, editing])
 
+  const previewUrl = useMemo(() => {
+    if (type === 'usb') {
+      const dev = usbDevices.find((d) => d.deviceId === selectedDevice)
+      if (!dev) return ''
+      return `/api/cameras/usb/preview?deviceId=${encodeURIComponent(dev.deviceId)}&deviceLabel=${encodeURIComponent(dev.deviceLabel)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
+    }
+    if (type === 'mipi') {
+      const dev = mipiDevices.find((d) => d.index === selectedMipi)
+      if (!dev) return ''
+      return `/api/cameras/mipi/preview?deviceId=${encodeURIComponent(dev.index)}&deviceLabel=${encodeURIComponent(dev.name)}&sensor=${encodeURIComponent(dev.sensor)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
+    }
+    return ''
+  }, [type, selectedDevice, usbDevices, selectedMipi, mipiDevices, flip, brightness])
+
   if (!open) return null
 
   const handleSubmit = async (e: FormEvent) => {
@@ -1541,20 +1612,6 @@ function CameraModal({
       setError(err instanceof Error ? err.message : 'failed to save camera')
     }
   }
-
-  const previewUrl = useMemo(() => {
-    if (type === 'usb') {
-      const dev = usbDevices.find((d) => d.deviceId === selectedDevice)
-      if (!dev) return ''
-      return `/api/cameras/usb/preview?deviceId=${encodeURIComponent(dev.deviceId)}&deviceLabel=${encodeURIComponent(dev.deviceLabel)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
-    }
-    if (type === 'mipi') {
-      const dev = mipiDevices.find((d) => d.index === selectedMipi)
-      if (!dev) return ''
-      return `/api/cameras/mipi/preview?deviceId=${encodeURIComponent(dev.index)}&deviceLabel=${encodeURIComponent(dev.name)}&sensor=${encodeURIComponent(dev.sensor)}&flip=${encodeURIComponent(flip)}&brightness=${encodeURIComponent(brightness)}&_=${Date.now()}`
-    }
-    return ''
-  }, [type, selectedDevice, usbDevices, selectedMipi, mipiDevices, flip, brightness])
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
@@ -1816,11 +1873,18 @@ export function Recordings() {
   const { printers } = usePrinters()
   const [selected, setSelected] = useState(cameras[0]?.id || '')
   const [recording, setRecording] = useState(false)
-  const [recordings, setRecordings] = useState<string[]>([])
+  const [timelapsing, setTimelapsing] = useState(false)
+  const [tab, setTab] = useState<'videos' | 'timelapses'>('videos')
+  const [videos, setVideos] = useState<string[]>([])
+  const [timelapses, setTimelapses] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [playing, setPlaying] = useState<string | null>(null)
+  const [tlInterval, setTlInterval] = useState(1)
+  const [status, setStatus] = useState<{ video?: any; timelapse?: any }>({})
+  const [confirmStop, setConfirmStop] = useState<'video' | 'timelapse' | null>(null)
 
   const recordable = cameras.filter((c) => c.type === 'usb' || c.type === 'mipi')
+  const recordings = tab === 'videos' ? videos : timelapses
 
   useEffect(() => {
     if (recordable.length && !recordable.find((c) => c.id === selected)) {
@@ -1830,17 +1894,38 @@ export function Recordings() {
 
   const loadRecordings = async () => {
     try {
-      const res = await fetch('/api/recordings')
-      const data = await res.json()
-      setRecordings(Array.isArray(data.recordings) ? data.recordings : [])
+      const [vRes, tRes] = await Promise.all([
+        fetch('/api/recordings/videos'),
+        fetch('/api/recordings/timelapses'),
+      ])
+      const vData = await vRes.json()
+      const tData = await tRes.json()
+      setVideos(Array.isArray(vData.recordings) ? vData.recordings : [])
+      setTimelapses(Array.isArray(tData.recordings) ? tData.recordings : [])
     } catch (e) {
       console.error(e)
     }
   }
 
+  const loadStatus = async () => {
+    if (!selected) return
+    try {
+      const res = await fetch(`/api/cameras/${selected}/record/status`)
+      const data = await res.json()
+      setStatus(data)
+      setRecording(data.video?.active || false)
+      setTimelapsing(data.timelapse?.active || false)
+    } catch (e) {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     loadRecordings()
-  }, [])
+    loadStatus()
+    const id = setInterval(loadStatus, 2000)
+    return () => clearInterval(id)
+  }, [selected])
 
   const startRecording = async () => {
     if (!selected) return
@@ -1862,7 +1947,6 @@ export function Recordings() {
       } else {
         alert(`Recording start failed: ${data.error || 'unknown'}`)
       }
-      await loadRecordings()
     } catch (e: any) {
       alert(`Recording start error: ${e.message || e}`)
     } finally {
@@ -1872,14 +1956,14 @@ export function Recordings() {
 
   const stopRecording = async () => {
     setBusy(true)
+    setConfirmStop(null)
     try {
       const res = await fetch(`/api/cameras/${selected}/record/stop`, { method: 'POST' })
       const data = await res.json().catch(() => ({ error: 'invalid response' }))
-      if (data.success) {
-        setRecording(false)
-      } else {
+      if (!data.success) {
         alert(`Recording stop failed: ${data.error || 'unknown'}`)
       }
+      setRecording(false)
       await loadRecordings()
     } catch (e: any) {
       alert(`Recording stop error: ${e.message || e}`)
@@ -1888,96 +1972,350 @@ export function Recordings() {
     }
   }
 
+  const startTimelapse = async () => {
+    if (!selected) return
+    const camera = recordable.find((c) => c.id === selected)
+    const printer = printers.find((p) => p.id === camera?.printerId)
+    const printerName = printer?.name || ''
+    const gcode = printer?.currentFile || ''
+
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/cameras/${selected}/record/timelapse/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printer: printerName, gcode, intervalSeconds: tlInterval }),
+      })
+      const data = await res.json().catch(() => ({ error: 'invalid response' }))
+      if (data.success) {
+        setTimelapsing(true)
+      } else {
+        alert(`Timelapse start failed: ${data.error || 'unknown'}`)
+      }
+    } catch (e: any) {
+      alert(`Timelapse start error: ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const stopTimelapse = async () => {
+    setBusy(true)
+    setConfirmStop(null)
+    try {
+      const res = await fetch(`/api/cameras/${selected}/record/timelapse/stop`, { method: 'POST' })
+      const data = await res.json().catch(() => ({ error: 'invalid response' }))
+      if (!data.success) {
+        alert(`Timelapse stop failed: ${data.error || 'unknown'}`)
+      }
+      setTimelapsing(false)
+      await loadRecordings()
+    } catch (e: any) {
+      alert(`Timelapse stop error: ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const convertToTimelapse = async (filename: string) => {
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/recordings/videos/${encodeURIComponent(filename)}/convert/timelapse`, { method: 'POST' })
+      const data = await res.json().catch(() => ({ error: 'invalid response' }))
+      if (!data.success) {
+        alert(`Convert failed: ${data.error || 'unknown'}`)
+      }
+      await loadRecordings()
+      setTab('timelapses')
+    } catch (e: any) {
+      alert(`Convert error: ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteRecording = async (filename: string) => {
+    if (!confirm(`Delete ${filename}?`)) return
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/recordings/${tab}/${encodeURIComponent(filename)}/delete`, { method: 'POST' })
+      const data = await res.json().catch(() => ({ error: 'invalid response' }))
+      if (!data.success) {
+        alert(`Delete failed: ${data.error || 'unknown'}`)
+      }
+      await loadRecordings()
+    } catch (e: any) {
+      alert(`Delete error: ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const fmtElapsed = (s: number) => {
+    const h = Math.floor(s / 3600)
+    const m = Math.floor((s % 3600) / 60)
+    const sec = Math.floor(s % 60)
+    return h > 0 ? `${h}h ${m}m ${sec}s` : `${m}m ${sec}s`
+  }
+
   return (
     <div className="space-y-6">
-      <SectionTitle
-        title="Recordings"
-        action={
-          <div className="flex items-center gap-2">
-            <select
-              value={selected}
-              onChange={(e) => setSelected(e.target.value)}
-              className="rounded-lg border-2 border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-300 focus:border-blue-500 focus:outline-none"
-              disabled={recordable.length === 0}
-            >
-              {recordable.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={recording ? stopRecording : startRecording}
-              disabled={!selected || busy || recordable.length === 0}
-              className={`rounded-lg px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50 ${
-                recording ? 'bg-rose-600 hover:bg-rose-500' : 'bg-blue-600 hover:bg-blue-500'
-              }`}
-            >
-              {recording ? 'Stop recording' : 'Start recording'}
-            </button>
-          </div>
-        }
-      />
+      <SectionTitle title="Recordings" />
       {recordable.length === 0 ? (
         <p className="font-mono text-sm text-slate-500">No recordable cameras (USB/MIPI). Add a camera to start recording.</p>
-      ) : recordings.length === 0 ? (
-        <p className="font-mono text-sm text-slate-500">No recordings yet. Start a recording to capture timelapse sessions.</p>
       ) : (
-        <ul className="space-y-2">
-          {recordings.map((r) => (
-            <li key={r} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950">
-              <span className="font-mono text-sm text-slate-700 dark:text-slate-300">{r}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPlaying(`/recordings/${r}`)}
-                  className="rounded-lg bg-blue-100 px-3 py-1 font-mono text-sm font-medium text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
-                >
-                  play
-                </button>
-                <a
-                  href={`/recordings/${r}`}
-                  download
-                  className="rounded-lg bg-slate-100 px-3 py-1 font-mono text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                >
-                  download
-                </a>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      {playing && (
         <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900 dark:text-white">Player</h3>
-            <button onClick={() => setPlaying(null)} className="text-sm text-slate-500 hover:text-slate-300">
-              close
-            </button>
+          <h3 className="mb-4 font-mono font-semibold text-blue-400">[ capture ]</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block font-mono text-xs text-slate-400">Camera</label>
+              <select
+                value={selected}
+                onChange={(e) => setSelected(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              >
+                {recordable.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                <h4 className="mb-2 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">Video recording</h4>
+                <p className="mb-3 font-mono text-xs text-slate-500">Capture full-speed MJPEG video as MKV.</p>
+                {recording && status.video ? (
+                  <div className="mb-3 space-y-1 font-mono text-xs text-slate-400">
+                    <p>elapsed: {fmtElapsed(status.video.elapsedSeconds || 0)}</p>
+                    <p>frames: {status.video.frames || 0}</p>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => (recording ? setConfirmStop('video') : startRecording())}
+                  disabled={busy || timelapsing}
+                  className={`w-full rounded-lg px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50 ${
+                    recording ? 'bg-rose-600 hover:bg-rose-500' : 'bg-blue-600 hover:bg-blue-500'
+                  }`}
+                >
+                  {recording ? 'Stop recording' : 'Start recording'}
+                </button>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+                <h4 className="mb-2 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">Timelapse</h4>
+                <p className="mb-2 font-mono text-xs text-slate-500">Capture one frame at a set interval.</p>
+                <div className="mb-3">
+                  <label className="mb-1 block font-mono text-xs text-slate-400">
+                    Interval: {tlInterval}s {tlInterval >= 60 ? `(${(tlInterval / 60).toFixed(1)} min)` : ''}
+                  </label>
+                  <input
+                    type="range"
+                    min={1}
+                    max={300}
+                    step={1}
+                    value={tlInterval}
+                    onChange={(e) => setTlInterval(Number(e.target.value))}
+                    className="w-full accent-blue-600"
+                    disabled={timelapsing}
+                  />
+                </div>
+                {timelapsing && status.timelapse ? (
+                  <div className="mb-3 space-y-1 font-mono text-xs text-slate-400">
+                    <p>elapsed: {fmtElapsed(status.timelapse.elapsedSeconds || 0)}</p>
+                    <p>frames: {status.timelapse.frames || 0}</p>
+                    <p>next: {new Date(status.timelapse.nextCapture).toLocaleTimeString()}</p>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => (timelapsing ? setConfirmStop('timelapse') : startTimelapse())}
+                  disabled={busy || recording}
+                  className={`w-full rounded-lg px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50 ${
+                    timelapsing ? 'bg-rose-600 hover:bg-rose-500' : 'bg-blue-600 hover:bg-blue-500'
+                  }`}
+                >
+                  {timelapsing ? 'Stop timelapse' : 'Start timelapse'}
+                </button>
+              </div>
+            </div>
           </div>
-          <video controls className="w-full rounded-lg" src={playing}>
-            Your browser does not support the video tag.
-          </video>
         </Card>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setTab('videos')}
+          className={`rounded-lg px-4 py-2 font-mono text-sm font-medium ${
+            tab === 'videos'
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+          }`}
+        >
+          videos ({videos.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('timelapses')}
+          className={`rounded-lg px-4 py-2 font-mono text-sm font-medium ${
+            tab === 'timelapses'
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+          }`}
+        >
+          timelapses ({timelapses.length})
+        </button>
+      </div>
+
+      {recordings.length === 0 ? (
+        <p className="font-mono text-sm text-slate-500">No {tab} yet.</p>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {recordings.map((r) => (
+            <div key={r} className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+              <div className="relative aspect-video bg-slate-900">
+                <img
+                  src={`/api/recordings/${tab}/${encodeURIComponent(r)}/thumb`}
+                  alt={r}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none'
+                  }}
+                />
+              </div>
+              <div className="p-3">
+                <p className="mb-2 truncate font-mono text-xs text-slate-700 dark:text-slate-300" title={r}>
+                  {r}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPlaying(`/recordings/${tab}/${r}`)}
+                    className="rounded-lg bg-blue-100 px-3 py-1 font-mono text-xs font-medium text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                  >
+                    play
+                  </button>
+                  <a
+                    href={`/recordings/${tab}/${r}`}
+                    download
+                    className="rounded-lg bg-slate-100 px-3 py-1 font-mono text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                  >
+                    download
+                  </a>
+                  {tab === 'videos' && (
+                    <button
+                      type="button"
+                      onClick={() => convertToTimelapse(r)}
+                      disabled={busy}
+                      className="rounded-lg bg-purple-100 px-3 py-1 font-mono text-xs font-medium text-purple-700 hover:bg-purple-200 disabled:opacity-50 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50"
+                    >
+                      to timelapse
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => deleteRecording(r)}
+                    disabled={busy}
+                    className="rounded-lg bg-rose-100 px-3 py-1 font-mono text-xs font-medium text-rose-700 hover:bg-rose-200 disabled:opacity-50 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50"
+                  >
+                    delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {playing && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setPlaying(null)}
+        >
+          <div
+            className="dark w-full max-w-3xl rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-mono text-sm font-semibold text-blue-400">[ player ]</h3>
+              <button type="button" onClick={() => setPlaying(null)} className="text-sm text-slate-500 hover:text-slate-300">
+                close
+              </button>
+            </div>
+            <video controls autoPlay className="w-full rounded-lg" src={playing}>
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        </div>
+      )}
+
+      {confirmStop && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setConfirmStop(null)}
+        >
+          <div
+            className="dark w-full max-w-sm rounded-none border-2 border-slate-700 border-t-4 border-t-rose-600 bg-slate-950 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="mb-2 font-mono text-lg font-semibold text-rose-500">
+              [ stop {confirmStop === 'video' ? 'recording' : 'timelapse'} ]
+            </h2>
+            <p className="mb-4 font-mono text-sm text-slate-400">
+              Stop the active {confirmStop === 'video' ? 'recording' : 'timelapse'}? This will finalise the file.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmStop(null)}
+                disabled={busy}
+                className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => (confirmStop === 'video' ? stopRecording() : stopTimelapse())}
+                disabled={busy}
+                className="rounded-lg bg-rose-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+              >
+                stop
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
-function HistoryRow({ h }: { h: PrintRecord }) {
+function HistoryRow({ h, onDelete }: { h: PrintRecord; onDelete: (id: string) => void }) {
   return (
     <tr className="border-b border-slate-100 last:border-0 dark:border-slate-800">
       <td className="py-3 text-sm font-medium text-slate-900 dark:text-white">{h.file}</td>
       <td className="py-3 text-sm text-slate-500 dark:text-slate-400">{h.printer}</td>
       <td className="py-3 text-sm text-slate-500 dark:text-slate-400">{h.started}</td>
       <td className="py-3 text-sm text-slate-500 dark:text-slate-400">{h.duration}</td>
-      <td className={`py-3 text-sm font-semibold ${resultColor[h.result]}`}>{h.result}</td>
+      <td className={`py-3 text-sm font-semibold ${resultColor[h.result] || 'text-slate-600 dark:text-slate-400'}`}>{h.result}</td>
+      <td className="py-3 text-right">
+        <button
+          type="button"
+          onClick={() => onDelete(h.id)}
+          className="rounded-lg bg-rose-100 px-2 py-1 font-mono text-xs font-medium text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50"
+        >
+          delete
+        </button>
+      </td>
     </tr>
   )
 }
 
 export function History() {
+  const { printers } = usePrinters()
   const [history, setHistory] = useState<PrintRecord[]>([])
   const [loading, setLoading] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
 
   const loadHistory = async () => {
     try {
@@ -1993,6 +2331,8 @@ export function History() {
 
   useEffect(() => {
     loadHistory()
+    const id = setInterval(loadHistory, 5000)
+    return () => clearInterval(id)
   }, [])
 
   const clearAll = async () => {
@@ -2005,25 +2345,60 @@ export function History() {
     }
   }
 
+  const deleteRow = async (id: string) => {
+    try {
+      const res = await fetch(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (res.ok) setHistory((h) => h.filter((r) => r.id !== id))
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const addEntry = async (entry: { printer: string; file: string; result: string; startedAt: string; endedAt: string }) => {
+    try {
+      const res = await fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      })
+      if (res.ok) {
+        setAddOpen(false)
+        await loadHistory()
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <SectionTitle
         title="Print History"
         action={
-          history.length > 0 ? (
+          <div className="flex items-center gap-2">
             <button
-              onClick={clearAll}
-              className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700"
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500"
             >
-              clear
+              <Plus className="h-4 w-4" /> add entry
             </button>
-          ) : null
+            {history.length > 0 && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700"
+              >
+                clear
+              </button>
+            )}
+          </div>
         }
       />
       {loading ? (
         <p className="font-mono text-sm text-slate-500">loading history...</p>
       ) : history.length === 0 ? (
-        <p className="font-mono text-sm text-slate-500">No print history yet.</p>
+        <p className="font-mono text-sm text-slate-500">No print history yet. History is recorded automatically when prints finish, or add an entry manually.</p>
       ) : (
         <Card className="overflow-x-auto">
           <table className="w-full text-left">
@@ -2034,16 +2409,112 @@ export function History() {
                 <th className="pb-3">Started</th>
                 <th className="pb-3">Duration</th>
                 <th className="pb-3">Result</th>
+                <th className="pb-3"></th>
               </tr>
             </thead>
             <tbody>
               {history.map((h) => (
-                <HistoryRow key={h.id} h={h} />
+                <HistoryRow key={h.id} h={h} onDelete={deleteRow} />
               ))}
             </tbody>
           </table>
         </Card>
       )}
+      {addOpen && (
+        <AddHistoryModal
+          printers={printers}
+          onClose={() => setAddOpen(false)}
+          onAdd={addEntry}
+        />
+      )}
+    </div>
+  )
+}
+
+function AddHistoryModal({
+  printers,
+  onClose,
+  onAdd,
+}: {
+  printers: Printer[]
+  onClose: () => void
+  onAdd: (entry: { printer: string; file: string; result: string; startedAt: string; endedAt: string }) => void
+}) {
+  const [printer, setPrinter] = useState(printers[0]?.name || '')
+  const [file, setFile] = useState('')
+  const [result, setResult] = useState('Success')
+  const [duration, setDuration] = useState(60)
+  const inputClass =
+    'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
+  const btnClass =
+    'rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white shadow-sm hover:bg-blue-500 disabled:opacity-50'
+  const ghostClass =
+    'rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700'
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!file || !printer) return
+    const now = new Date()
+    const start = new Date(now.getTime() - duration * 1000)
+    onAdd({
+      printer,
+      file,
+      result,
+      startedAt: start.toISOString(),
+      endedAt: now.toISOString(),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-4 font-mono text-xl font-semibold text-blue-400">[ add_history ]</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            placeholder="G-code file name *"
+            value={file}
+            onChange={(e) => setFile(e.target.value)}
+            className={inputClass}
+          />
+          <select value={printer} onChange={(e) => setPrinter(e.target.value)} className={inputClass}>
+            {printers.map((p) => (
+              <option key={p.id} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+            <option value="Manual">Manual / Other</option>
+          </select>
+          <select value={result} onChange={(e) => setResult(e.target.value)} className={inputClass}>
+            <option value="Success">Success</option>
+            <option value="Failed">Failed</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+          <div>
+            <label className="mb-1 block font-mono text-xs text-slate-400">Duration (minutes): {Math.round(duration / 60)}</label>
+            <input
+              type="range"
+              min={60}
+              max={36000}
+              step={60}
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+              className="w-full accent-blue-600"
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={onClose} className={ghostClass}>
+              cancel
+            </button>
+            <button type="submit" disabled={!file || !printer} className={btnClass}>
+              add
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -2663,6 +3134,7 @@ export function Terminal() {
   const [lines, setLines] = useState<string[]>([])
   const [paused, setPaused] = useState(false)
   const [mini, setMini] = useState(() => loadConfig().showMiniTerminal)
+  const [search, setSearch] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -2718,7 +3190,11 @@ export function Terminal() {
     return f?.color ?? 'text-slate-300'
   }
 
-  const filteredLines = lines.filter((line) => filter === 'all' || lineCategory(line) === filter)
+  const filteredLines = lines.filter((line) => {
+    if (filter !== 'all' && lineCategory(line) !== filter) return false
+    if (search && !line.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">
@@ -2755,7 +3231,17 @@ export function Terminal() {
             {f.label}
           </button>
         ))}
-        <span className="ml-auto font-mono text-xs text-slate-500">
+        <div className="relative ml-auto">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            placeholder="search logs..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-48 rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-8 pr-3 font-mono text-xs text-slate-300 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+        <span className="font-mono text-xs text-slate-500">
           {filteredLines.length} line{filteredLines.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -3036,77 +3522,21 @@ export function Settings() {
               )}
             </ProviderSection>
 
-            <ProviderSection
-              title="FlashForge"
-              enabled={config.providers.flashforge.enabled}
-              onToggle={(v) => updateProvider('flashforge', { enabled: v })}
-            >
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Enable the FlashForge network driver.
+            <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+              <h4 className="mb-2 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">
+                Other printers
+              </h4>
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+                FlashForge, Klipper/Moonraker, and other printers are added via the
+                add-printer wizard on the Printers page.
               </p>
-              <input
-                type="text"
-                placeholder="Host / IP"
-                className={inputClass}
-                value={config.providers.flashforge.host}
-                onChange={(e) => updateProvider('flashforge', { host: e.target.value })}
-              />
-              <input
-                type="text"
-                placeholder="API key"
-                className={inputClass}
-                value={config.providers.flashforge.apiKey}
-                onChange={(e) => updateProvider('flashforge', { apiKey: e.target.value })}
-              />
-            </ProviderSection>
-
-            <ProviderSection
-              title="Klipper / Moonraker"
-              enabled={config.providers.klipper.enabled}
-              onToggle={(v) => updateProvider('klipper', { enabled: v })}
-            >
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Enable the Klipper/Moonraker driver.
-              </p>
-              <input
-                type="text"
-                placeholder="Host / IP"
-                className={inputClass}
-                value={config.providers.klipper.host}
-                onChange={(e) => updateProvider('klipper', { host: e.target.value })}
-              />
-              <input
-                type="text"
-                placeholder="API key (optional)"
-                className={inputClass}
-                value={config.providers.klipper.apiKey}
-                onChange={(e) => updateProvider('klipper', { apiKey: e.target.value })}
-              />
-            </ProviderSection>
-
-            <ProviderSection
-              title="Other / Generic"
-              enabled={config.providers.other.enabled}
-              onToggle={(v) => updateProvider('other', { enabled: v })}
-            >
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Enable a generic network or serial driver.
-              </p>
-              <input
-                type="text"
-                placeholder="Host / IP"
-                className={inputClass}
-                value={config.providers.other.host}
-                onChange={(e) => updateProvider('other', { host: e.target.value })}
-              />
-              <input
-                type="text"
-                placeholder="API key (optional)"
-                className={inputClass}
-                value={config.providers.other.apiKey}
-                onChange={(e) => updateProvider('other', { apiKey: e.target.value })}
-              />
-            </ProviderSection>
+              <Link
+                to="/printers"
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500"
+              >
+                <Plus className="h-4 w-4" /> add printer
+              </Link>
+            </div>
           </div>
         </Card>
 

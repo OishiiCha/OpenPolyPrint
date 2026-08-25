@@ -512,6 +512,33 @@ func Mount(mux *http.ServeMux, m *Manager) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "name": m.Names().Get(folder, filename)})
 	})
 
+	mux.HandleFunc("/api/recordings/{folder}/{filename}/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		folder := r.PathValue("folder")
+		filename := r.PathValue("filename")
+		if folder == "" || filename == "" {
+			http.Error(w, `{"error":"folder and filename required"}`, http.StatusBadRequest)
+			return
+		}
+		path := filepath.Join("recordings", folder, filename)
+		if _, err := os.Stat(path); err != nil {
+			http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+			return
+		}
+		if err := os.Remove(path); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+			return
+		}
+		m.Names().Set(folder, filename, "")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
 	mux.Handle("/recordings/", http.StripPrefix("/recordings/", http.FileServer(http.Dir("recordings"))))
 }
 
