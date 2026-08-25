@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { PhoneLayout } from './components/PhoneLayout'
 import {
   Dashboard,
   Printers,
@@ -15,7 +17,32 @@ import {
 } from './pages'
 import { Recordings } from './pages/Recordings'
 
+function useIsPhone() {
+  const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const handler = (e: MediaQueryListEvent) => setIsPhone(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isPhone
+}
+
 function App() {
+  const isPhone = useIsPhone()
+
+  if (isPhone) {
+    return (
+      <BrowserRouter>
+        <PhoneLayout>
+          <Routes>
+            <Route index element={<Dashboard />} />
+          </Routes>
+        </PhoneLayout>
+      </BrowserRouter>
+    )
+  }
+
   return (
     <BrowserRouter>
       <Routes>

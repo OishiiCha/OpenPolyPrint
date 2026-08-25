@@ -3206,6 +3206,50 @@ function IntegrationModal({
           </a>
         )}
 
+        {/* Slicer setup instructions */}
+        {(integration.id === 'prusaslicer' || integration.id === 'orcaslicer') && (
+          <div className="mb-6 rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+            <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">Setup instructions</h4>
+            <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
+              <li>Open {integration.name} → Settings → Physical Printers → Add</li>
+              <li>
+                Set the API URL to your OpenPolyPrint address:
+                <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
+                  http://{'<openpolyprint-ip>'}:8080
+                </code>
+              </li>
+              <li>Leave the API key field blank</li>
+              <li>Set the default target printer in OpenPolyPrint → Settings → Slicer upload target</li>
+              <li>
+                For per-printer routing, use this URL instead:
+                <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
+                  http://{'<ip>'}:8080/api/files/{'<printer_name>'}/local
+                </code>
+              </li>
+              <li>Upload G-code from the slicer — it will be sent to the printer via PPPP</li>
+            </ol>
+          </div>
+        )}
+
+        {integration.id === 'cura' && (
+          <div className="mb-6 rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+            <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">Setup instructions</h4>
+            <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
+              <li>Open Cura → Marketplace → search for "OctoPrint" → install the plugin</li>
+              <li>Restart Cura</li>
+              <li>Settings → Printer → Add Printer → Add by OctoPrint URL</li>
+              <li>
+                Enter your OpenPolyPrint address:
+                <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
+                  http://{'<openpolyprint-ip>'}:8080
+                </code>
+              </li>
+              <li>Leave the API key blank</li>
+              <li>Set the default target printer in OpenPolyPrint → Settings → Slicer upload target</li>
+            </ol>
+          </div>
+        )}
+
         <div className="mb-6 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/50 p-3">
           <span className="font-mono text-sm text-slate-300">
             {integration.alwaysActive ? 'Always enabled' : 'Enabled'}
@@ -3531,27 +3575,6 @@ export function Settings() {
                 className="h-4 w-4 rounded border-slate-300 text-blue-600"
               />
             </label>
-            <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-              <label className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
-                <div>
-                  <span className="font-medium">Screenshot mode</span>
-                  <p className="mt-0.5 font-mono text-xs text-slate-500 dark:text-slate-400">
-                    Blurs sensitive info (passwords, tokens, IPs, account details) for safe screenshots
-                  </p>
-                </div>
-                <Switch
-                  checked={config.screenshotMode}
-                  onChange={(v) => {
-                    update({ screenshotMode: v })
-                    // Apply immediately so the blur takes effect without
-                    // needing to click Save. handleSave merges with latest
-                    // localStorage so this won't be overwritten.
-                    const cfg = loadConfig()
-                    saveConfig({ ...cfg, screenshotMode: v })
-                  }}
-                />
-              </label>
-            </div>
           </div>
         </Card>
         <Card>
@@ -4170,6 +4193,54 @@ export function Help() {
             Multi-vendor 3D printer control built from the Anker protocol code. Designed for desktop first.
           </p>
           <p className="mt-2 text-xs text-slate-400">Version 0.1.0 · Prototype</p>
+        </Card>
+        <Card>
+          <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">Slicer setup (OctoPrint API)</h3>
+          <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
+            OpenPolyPrint exposes OctoPrint-compatible endpoints so slicers can upload G-code
+            and start prints directly. Set the slicer target printer in Settings → Slicer upload target.
+          </p>
+          <div className="space-y-4">
+            <div>
+              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">PrusaSlicer / OrcaSlicer</h4>
+              <ol className="ml-4 list-decimal space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <li>Open Settings → Physical Printers → Add</li>
+                <li>Set the API URL to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;openpolyprint-ip&gt;:8080</code></li>
+                <li>Leave the API key blank</li>
+                <li>Uploads go to the printer set in Settings → Slicer upload target</li>
+                <li>For per-printer routing, use <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;ip&gt;:8080/api/files/&lt;printer_name&gt;/local</code> as the URL</li>
+              </ol>
+            </div>
+            <div>
+              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">Cura</h4>
+              <ol className="ml-4 list-decimal space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <li>Install the OctoPrint plugin from Cura Marketplace</li>
+                <li>Add a printer with the OpenPolyPrint address as the OctoPrint URL</li>
+                <li>Leave the API key blank</li>
+                <li>Uploads go to the printer set in Settings → Slicer upload target</li>
+              </ol>
+            </div>
+            <div>
+              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">API endpoints</h4>
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <th className="pb-1 pr-4">Method</th>
+                    <th className="pb-1 pr-4">Endpoint</th>
+                    <th className="pb-1">Purpose</th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-600 dark:text-slate-300">
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1 pr-4 font-mono">GET</td><td className="pr-4 font-mono">/api/version</td><td>API version</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1 pr-4 font-mono">GET</td><td className="pr-4 font-mono">/api/printer</td><td>State + temps</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1 pr-4 font-mono">GET</td><td className="pr-4 font-mono">/api/job</td><td>Current job</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1 pr-4 font-mono">POST</td><td className="pr-4 font-mono">/api/files/local</td><td>Upload (default printer)</td></tr>
+                  <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-1 pr-4 font-mono">POST</td><td className="pr-4 font-mono">/api/files/{"{name}"}/local</td><td>Upload (specific printer)</td></tr>
+                  <tr><td className="py-1 pr-4 font-mono">POST</td><td className="pr-4 font-mono">/api/files/{"{name}"}</td><td>Select/start print</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </Card>
         <Card>
           <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">Anker M5 and M5C MQTT command types</h3>

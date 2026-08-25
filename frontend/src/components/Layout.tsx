@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { NavLink, Link, Outlet } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -14,6 +15,7 @@ import {
   Sun,
   Moon,
   Download,
+  X,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { usePWAInstall } from '../hooks/usePWAInstall'
@@ -105,8 +107,8 @@ function MiniTerminal() {
 export function Layout() {
   const [isDark, setIsDark] = useState(() => loadConfig().dark)
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
-  const [screenshotMode, setScreenshotMode] = useState(() => loadConfig().screenshotMode)
-  const { canInstall, promptInstall } = usePWAInstall()
+  const [showInstallGuide, setShowInstallGuide] = useState(false)
+  const { canInstall, canInstallManual, isHttps, installed, promptInstall } = usePWAInstall()
 
   useEffect(() => {
     if (isDark) {
@@ -117,19 +119,10 @@ export function Layout() {
   }, [isDark])
 
   useEffect(() => {
-    if (screenshotMode) {
-      document.documentElement.classList.add('screenshot-mode')
-    } else {
-      document.documentElement.classList.remove('screenshot-mode')
-    }
-  }, [screenshotMode])
-
-  useEffect(() => {
     const handler = () => {
       const cfg = loadConfig()
       setIsDark(cfg.dark)
       setShowMini(cfg.showMiniTerminal)
-      setScreenshotMode(cfg.screenshotMode)
     }
     window.addEventListener('openpolyprint-config-updated', handler)
     return () => window.removeEventListener('openpolyprint-config-updated', handler)
@@ -144,14 +137,6 @@ export function Layout() {
             OpenPolyPrint
           </span>
         </Link>
-
-        {screenshotMode && (
-          <div className="mx-3 mb-2 rounded-lg bg-amber-100 px-3 py-2 dark:bg-amber-900/40">
-            <p className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-300">
-              screenshot mode active — sensitive info is blurred
-            </p>
-          </div>
-        )}
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
           {navItems.map((item) => (
@@ -185,6 +170,15 @@ export function Layout() {
               Install app
             </button>
           )}
+          {canInstallManual && !installed && (
+            <button
+              onClick={() => setShowInstallGuide(true)}
+              className="mb-2 flex w-full items-center gap-3 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+            >
+              <Download className="h-5 w-5" />
+              Install app
+            </button>
+          )}
           <button
             onClick={() => {
               const cfg = loadConfig()
@@ -203,6 +197,80 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {showInstallGuide && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setShowInstallGuide(false)}
+        >
+          <div
+            className="dark w-full max-w-lg rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-mono font-semibold text-blue-400">Install OpenPolyPrint</h2>
+              <button onClick={() => setShowInstallGuide(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {!isHttps && (
+              <div className="mb-4 rounded-lg border border-amber-600/50 bg-amber-950/30 p-3">
+                <p className="font-mono text-xs text-amber-400">
+                  You're accessing OpenPolyPrint over HTTP. Chrome only supports
+                  one-click PWA install on HTTPS or localhost. You can still install
+                  manually using the instructions below.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="mb-2 font-mono text-sm font-semibold text-slate-200">Chrome / Edge (Desktop)</h3>
+                <ol className="ml-4 list-decimal space-y-1 font-mono text-xs text-slate-400">
+                  <li>Click the install icon in the address bar</li>
+                  <li>Or: Menu (three dots) → Cast, save, and share → Install page as app</li>
+                </ol>
+              </div>
+
+              <div>
+                <h3 className="mb-2 font-mono text-sm font-semibold text-slate-200">Chrome (Android)</h3>
+                <ol className="ml-4 list-decimal space-y-1 font-mono text-xs text-slate-400">
+                  <li>Open the menu (three dots)</li>
+                  <li>Tap "Add to Home screen"</li>
+                  <li>Confirm — the app will appear on your home screen</li>
+                </ol>
+              </div>
+
+              <div>
+                <h3 className="mb-2 font-mono text-sm font-semibold text-slate-200">Safari (iOS)</h3>
+                <ol className="ml-4 list-decimal space-y-1 font-mono text-xs text-slate-400">
+                  <li>Tap the Share button</li>
+                  <li>Scroll down and tap "Add to Home Screen"</li>
+                  <li>Tap "Add" — the app will appear on your home screen</li>
+                </ol>
+              </div>
+
+              <div>
+                <h3 className="mb-2 font-mono text-sm font-semibold text-slate-200">Firefox</h3>
+                <p className="ml-4 font-mono text-xs text-slate-400">
+                  Firefox doesn't support PWA install on desktop. Use Chrome or Edge instead.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowInstallGuide(false)}
+                className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }

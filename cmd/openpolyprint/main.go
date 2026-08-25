@@ -712,16 +712,30 @@ func main() {
 	//   1. POST /api/files/{printerName}/local — explicit printer in path
 	//   2. POST /api/files/local — uses the configured "slicer target" printer
 
-	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+	// corsMiddleware adds CORS headers for browser-based slicer plugins.
+	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Api-Key")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("/api/version", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"api":    "0.1",
 			"server": "2.0.0",
 			"text":   "OpenPolyPrint OctoPrint-compatible API",
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/connection", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/connection", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusNoContent)
@@ -736,9 +750,9 @@ func main() {
 				"autoconnect":     false,
 			},
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/printer", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/printer", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		target := loadSlicerTarget(settingsFile)
 		var status printers.Status
 		if target != "" {
@@ -771,9 +785,9 @@ func main() {
 				"bed":   map[string]float64{"actual": status.Temps.Bed, "target": status.Temps.TargetBed, "offset": 0},
 			},
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/job", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/job", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		target := loadSlicerTarget(settingsFile)
 		var status printers.Status
 		if target != "" {
@@ -812,27 +826,92 @@ func main() {
 			},
 			"state": stateText,
 		})
-	})
+	}))
+
+	// Stub endpoints that some slicers probe to verify OctoPrint connectivity
+	mux.HandleFunc("/api/settings", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"api":     map[string]any{"enabled": true, "key": ""},
+			"feature": map[string]any{"gcodeViewer": true},
+			"folder":  map[string]string{"uploads": "/uploads", "timelapse": "/timelapses"},
+			"webcam":  map[string]any{"streamUrl": "/api/cameras", "ffmpeg": true},
+		})
+	}))
+
+	mux.HandleFunc("/api/timelapse", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"config": map[string]string{"type": "off"},
+			"files":  []any{},
+		})
+	}))
+
+	// /api/files (without trailing slash) — return empty file list
+	mux.HandleFunc("/api/files", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"files": []any{},
+		})
+	}))
 
 	// OctoPrint file upload: POST /api/files/local or POST /api/files/{printer}/local
 	mux.HandleFunc("/api/files/", func(w http.ResponseWriter, r *http.Request) {
+		// CORS for browser-based slicer plugins (e.g. Cura)
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Api-Key")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// GET /api/files or /api/files/local — return empty file list
+		// (slicers often probe this before uploading)
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"files": []any{},
+			})
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Parse path: /api/files/{printer}/local or /api/files/local
+		// Parse path. OctoPrint paths we support:
+		//   POST /api/files/local                      → upload to default printer
+		//   POST /api/files/{printer}/local            → upload to specific printer
+		//   POST /api/files/local/{filename}           → select/start print (standard OctoPrint)
+		//   POST /api/files/{printer}/local/{filename} → select/start on specific printer
 		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/")
-		var printerName, action string
-		if len(pathParts) >= 2 && pathParts[0] != "local" {
+
+		var printerName string
+		var isUpload bool
+		var fileToPrint string
+
+		if len(pathParts) == 1 && pathParts[0] == "local" {
+			// /api/files/local → upload
+			isUpload = true
+		} else if len(pathParts) == 2 && pathParts[1] == "local" {
+			// /api/files/{printer}/local → upload
 			printerName = pathParts[0]
-			action = pathParts[1]
+			isUpload = true
+		} else if len(pathParts) == 2 && pathParts[0] == "local" {
+			// /api/files/local/{filename} → select (standard OctoPrint)
+			fileToPrint = pathParts[1]
+		} else if len(pathParts) == 3 && pathParts[1] == "local" {
+			// /api/files/{printer}/local/{filename} → select on specific printer
+			printerName = pathParts[0]
+			fileToPrint = pathParts[2]
 		} else if len(pathParts) >= 1 {
-			action = pathParts[0]
+			// Fallback: treat as select with first segment as filename
+			fileToPrint = pathParts[len(pathParts)-1]
 		}
 
-		// If action is "local", this is an upload. Otherwise it's a file select.
-		if action == "local" {
+		if isUpload {
 			// File upload via multipart form
 			if err := r.ParseMultipartForm(500 << 20); err != nil {
 				http.Error(w, `{"error":"failed to parse multipart form"}`, http.StatusBadRequest)
@@ -887,8 +966,9 @@ func main() {
 			}
 			log.Printf("[slicer] uploaded %s (%d bytes) to %s", filename, len(data), driver.Name())
 
-			// Check if the slicer requested to start printing immediately
-			printNow := r.FormValue("print") == "true"
+			// Check if the slicer requested to start printing immediately.
+			// OctoPrint uses ?print=true as a URL query parameter.
+			printNow := r.URL.Query().Get("print") == "true" || r.FormValue("print") == "true"
 			if printNow {
 				if err := driver.StartPrint(r.Context(), filename); err != nil {
 					log.Printf("[slicer] start print %s on %s failed: %v", filename, driver.Name(), err)
@@ -912,8 +992,8 @@ func main() {
 			return
 		}
 
-		// File select: POST /api/files/{printer}/{filename} with {"command":"select","print":true}
-		// or POST /api/files/{filename} with {"command":"select","print":true}
+		// File select: POST /api/files/local/{filename} or /api/files/{printer}/local/{filename}
+		// with JSON body {"command":"select","print":true}
 		var req struct {
 			Command string `json:"command"`
 			Print   bool   `json:"print"`
@@ -923,13 +1003,6 @@ func main() {
 		if req.Command != "select" {
 			http.Error(w, `{"error":"unsupported command"}`, http.StatusBadRequest)
 			return
-		}
-
-		// The filename is the last path segment
-		fileToPrint := pathParts[len(pathParts)-1]
-		if printerName == "" {
-			// If no printer in path, the first segment is the filename
-			fileToPrint = pathParts[0]
 		}
 
 		m := mgr.Load()

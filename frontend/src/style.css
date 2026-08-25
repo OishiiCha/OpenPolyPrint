@@ -12,6 +12,12 @@ body,
   min-height: 100%;
 }
 
+/* Prevent overscroll/bounce on mobile */
+html {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -55,20 +61,11 @@ h4 {
   @apply bg-slate-600;
 }
 
-/* Screenshot mode: blur/redact elements marked .sensitive */
-.screenshot-mode .sensitive {
-  filter: blur(6px);
-  user-select: none;
-  cursor: not-allowed;
+/* Hide scrollbar but keep scrollable */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
-
-.screenshot-mode .sensitive input,
-.screenshot-mode .sensitive select,
-.screenshot-mode .sensitive textarea {
-  color: transparent !important;
-  text-shadow: 0 0 8px currentColor;
-}
-
-.screenshot-mode .sensitive img {
-  filter: blur(10px);
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
