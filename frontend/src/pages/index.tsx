@@ -3612,16 +3612,7 @@ export function Settings() {
         <Card>
           <div className="mb-2 flex items-center justify-between">
             <h3 className="font-semibold text-slate-900 dark:text-white">AI Analysis (Gemini)</h3>
-            <label className="flex items-center gap-2">
-              <span className="font-mono text-xs text-slate-500 dark:text-slate-400">Enable</span>
-              <button
-                type="button"
-                onClick={() => update({ geminiEnabled: !config.geminiEnabled })}
-                className={`relative h-6 w-11 rounded-full transition-colors ${config.geminiEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-700'}`}
-              >
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${config.geminiEnabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-              </button>
-            </label>
+            <Switch checked={config.geminiEnabled} onChange={(v) => update({ geminiEnabled: v })} />
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             Bring your own Gemini API key to enable AI-powered print analysis.
