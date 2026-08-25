@@ -13,8 +13,10 @@ import {
   HelpCircle,
   Sun,
   Moon,
+  Download,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
+import { usePWAInstall } from '../hooks/usePWAInstall'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -103,6 +105,7 @@ function MiniTerminal() {
 export function Layout() {
   const [isDark, setIsDark] = useState(() => loadConfig().dark)
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
+  const { canInstall, promptInstall } = usePWAInstall()
 
   useEffect(() => {
     if (isDark) {
@@ -155,6 +158,15 @@ export function Layout() {
         {showMini && <MiniTerminal />}
 
         <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+          {canInstall && (
+            <button
+              onClick={promptInstall}
+              className="mb-2 flex w-full items-center gap-3 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+            >
+              <Download className="h-5 w-5" />
+              Install app
+            </button>
+          )}
           <button
             onClick={() => {
               const cfg = loadConfig()
