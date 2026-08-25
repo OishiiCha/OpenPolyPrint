@@ -31,6 +31,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/queue"
 	"github.com/lucas/openpolyprint/internal/smartplug"
 	"github.com/lucas/openpolyprint/internal/tempstore"
+	"github.com/lucas/openpolyprint/internal/tlsautocert"
 )
 
 type headerTransport struct {
@@ -305,8 +306,9 @@ func findDistDir() string {
 
 func main() {
 	var (
-		dataDir = flag.String("data-dir", "", "directory that holds ankerctl default.json (default: platform config dir/ankerctl)")
-		addr    = flag.String("addr", ":8080", "http listen address for the api")
+		dataDir   = flag.String("data-dir", "", "directory that holds ankerctl default.json (default: platform config dir/ankerctl)")
+		addr      = flag.String("addr", ":443", "HTTPS listen address (HTTP always listens on :80 when TLS is enabled; when TLS is disabled this is the HTTP port)")
+		enableTLS = flag.Bool("tls", true, "enable HTTPS with auto-generated self-signed certificate")
 	)
 	flag.Parse()
 
@@ -1735,13 +1737,43 @@ func main() {
 		})
 	}
 
-	server := &http.Server{Addr: *addr, Handler: mux}
+	// HTTP server (port 80) — always serves the app
+	httpAddr := *addr
+	if *enableTLS {
+		// When TLS is on, the -addr port is for HTTPS; HTTP goes to :80
+		httpAddr = ":80"
+	}
+	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
-		fmt.Printf("OpenPolyPrint listening on http://localhost%s\n", *addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http server: %v", err)
+		fmt.Printf("OpenPolyPrint listening on http://localhost%s\n", httpAddr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[http] server on %s: %v", httpAddr, err)
 		}
 	}()
+
+	// HTTPS server — only when TLS is enabled
+	var tlsServer *http.Server
+	if *enableTLS {
+		tlsAddr := *addr
+
+		certDir := filepath.Join(settingsDir, "tls")
+		certPath, keyPath, regenerated, err := tlsautocert.EnsureCertificate(certDir)
+		if err != nil {
+			log.Printf("[tls] failed to generate certificate, HTTPS disabled: %v", err)
+		} else {
+			if regenerated {
+				log.Printf("[tls] certificate ready at %s (includes hostname + local IPs)", certPath)
+			}
+			tlsServer = &http.Server{Addr: tlsAddr, Handler: mux}
+			go func() {
+				fmt.Printf("OpenPolyPrint listening on https://localhost%s\n", tlsAddr)
+				fmt.Printf("  self-signed certificate — browser will show a security warning (this is normal for local HTTPS)\n")
+				if err := tlsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
+					log.Fatalf("[https] server on %s: %v", tlsAddr, err)
+				}
+			}()
+		}
+	}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -1750,5 +1782,8 @@ func main() {
 	fmt.Println("\nShutting down...")
 	_ = mgr.Load().DisconnectAll()
 	piMgr.GPIO.Close()
-	_ = server.Close()
+	_ = httpServer.Close()
+	if tlsServer != nil {
+		_ = tlsServer.Close()
+	}
 }

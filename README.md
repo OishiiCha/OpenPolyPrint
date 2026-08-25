@@ -38,10 +38,28 @@ npm run build
 ### Run
 
 ```bash
-./openpolyprint -addr :8080
+./openpolyprint
 ```
 
-The server serves the built frontend from `frontend/dist/`. Open http://localhost:8080.
+The server serves the built frontend from `frontend/dist/`. It listens on both:
+- **HTTP** on port `80` → http://localhost
+- **HTTPS** on port `443` → https://localhost
+
+HTTPS uses an auto-generated self-signed certificate that includes the
+machine's hostname and all local IP addresses as SANs, so you can access
+it via `https://<hostname>` or `https://<ip>` from any device on the
+network. The browser will show a security warning — this is normal for
+self-signed certificates. Click "Advanced" → "Proceed" to continue.
+
+To disable HTTPS and use plain HTTP only:
+
+```bash
+./openpolyprint -tls=false -addr :80
+```
+
+The certificate is stored in `<settings-dir>/tls/cert.pem` and `key.pem`.
+It is valid for 1 year and auto-regenerated on startup if expired or if
+the hostname/IP addresses have changed.
 
 ### Development
 
@@ -72,13 +90,14 @@ Settings are stored in the platform config directory (`~/.config/openpolyprint` 
 
 CLI flags:
 
-- `-addr` — HTTP listen address (default `:8080`)
+- `-addr` — HTTPS listen address (default `:443`; HTTP always on `:80` when TLS enabled)
+- `-tls` — enable HTTPS with auto-generated self-signed certificate (default `true`)
 - `-data-dir` — optional Anker config data directory
 
 Environment variables used by the Docker compose files:
 
 - `OPENPOLYPRINT_HOST` — bind host, e.g. `0.0.0.0`
-- `OPENPOLYPRINT_PORT` — bind port, e.g. `8080`
+- `OPENPOLYPRINT_PORT` — bind port, e.g. `443`
 - `OPENPOLYPRINT_DATA_DIR` — runtime data directory, e.g. `/data`
 
 ## Lint / CI

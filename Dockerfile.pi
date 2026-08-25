@@ -89,7 +89,7 @@ exec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
 RUN mkdir -p /data
 
 # Expose default web server port
-EXPOSE 8080
+EXPOSE 80 443
 
 ENTRYPOINT ["/entrypoint.sh", "openpolyprint"]
-CMD ["-addr", "0.0.0.0:8080"]
+CMD ["-addr", ":443"]
