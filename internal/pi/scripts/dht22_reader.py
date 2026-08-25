@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""DHT11 sensor reader for OpenPolyPrint filament box monitoring.
-Reads temperature and humidity from a DHT11 sensor on a specified GPIO pin.
+"""DHT22 sensor reader for OpenPolyPrint filament box monitoring.
+Reads temperature and humidity from a DHT22 sensor on a specified GPIO pin.
 Outputs JSON to stdout: {"temp": 25.0, "humidity": 45.0, "error": null}
 On error: {"temp": null, "humidity": null, "error": "message"}
 
-Usage: python3 dht11_reader.py <bcm_pin>
+Usage: python3 dht22_reader.py <bcm_pin>
 """
 
 import json
@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-# Make the vendored DHT11.py driver importable. It lives next to this script,
+# Make the vendored DHT22.py driver importable. It lives next to this script,
 # both in the repo and in the temp directory the Go server extracts us to.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -23,15 +23,15 @@ def _err(msg):
 
 def read_with_pigpio(pin):
     import pigpio
-    from DHT11 import DHT11
+    from DHT22 import DHT22
 
     pi = pigpio.pi()
     if not pi.connected:
         return _err("pigpiod not connected")
     try:
-        sensor = DHT11(pi, pin)
+        sensor = DHT22(pi, pin)
         try:
-            # DHT11 needs >=1s between reads; a first read after idle
+            # DHT22 needs >=2s between reads; a first read after idle
             # frequently fails the checksum, so retry.
             statuses = []
             for _ in range(3):
@@ -43,7 +43,7 @@ def read_with_pigpio(pin):
                         "error": None,
                     }
                 statuses.append(sensor.status or "unknown")
-                time.sleep(1.2)
+                time.sleep(2.2)
             if all(s == "no_signal" for s in statuses):
                 return _err("no signal on GPIO%d - sensor not connected or wrong pin" % pin)
             return _err("no valid reading from GPIO%d (%s) - check wiring and pull-up"
@@ -63,7 +63,7 @@ def read_with_adafruit(pin):
     # tree, so it works on Pi 2/3/4).
     pd.platform_detect = lambda: pd.RASPBERRY_PI
     pd.pi_revision = lambda: 2
-    humidity, temperature = Adafruit_DHT.read_retry(Adafruit_DHT.DHT11, pin, retries=3, delay_seconds=1)
+    humidity, temperature = Adafruit_DHT.read_retry(Adafruit_DHT.DHT22, pin, retries=3, delay_seconds=2)
     if humidity is not None and temperature is not None:
         return {"temp": round(temperature, 1), "humidity": round(humidity, 1), "error": None}
     return _err("Adafruit_DHT read failed")

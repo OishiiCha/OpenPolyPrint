@@ -172,11 +172,12 @@ func (d *Driver) Disconnect() error {
 	if d.pstate != nil {
 		d.pstate.SetConnected(false)
 	}
-	if d.api == nil {
-		return nil
+	if d.api != nil {
+		d.api.Stop()
+		_ = d.api.Close()
+		d.api = nil
 	}
-	d.api.Stop()
-	return d.api.Close()
+	return nil
 }
 
 // Status returns the current state of the printer.
@@ -205,7 +206,10 @@ func (d *Driver) Status() (printers.Status, error) {
 		if progress, ok := ps["progress"].(float64); ok && progress > 0 && progress < 10000 {
 			s.StatusText = "Printing"
 		} else if progress >= 10000 {
-			s.StatusText = "Idle"
+			// Print reached 100% — report as Finished so history records
+			// it as Success. The printer keeps the file loaded after
+			// completion, so we can't rely on "Idle" + empty CurrentFile.
+			s.StatusText = "Finished"
 		}
 	} else {
 		s.StatusText = "Offline"

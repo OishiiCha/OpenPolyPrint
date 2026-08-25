@@ -3,6 +3,7 @@ package printers
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -11,11 +12,12 @@ import (
 type Manager struct {
 	drivers []Driver
 	mu      sync.RWMutex
+	stopCh  chan struct{}
 }
 
 // NewManager creates a manager from a slice of already configured drivers.
 func NewManager(drivers []Driver) *Manager {
-	return &Manager{drivers: drivers}
+	return &Manager{drivers: drivers, stopCh: make(chan struct{})}
 }
 
 // ConnectAll tries to connect every driver concurrently.
@@ -53,6 +55,61 @@ func (m *Manager) DisconnectAll() error {
 		}
 	}
 	return firstErr
+}
+
+// Watchdog starts a background goroutine that periodically checks if any
+// driver is offline and attempts to reconnect it. This handles dropped
+// PPPP/MQTT connections without requiring a full restart.
+func (m *Manager) Watchdog(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-m.stopCh:
+				return
+			case <-ticker.C:
+				m.reconnectOffline(ctx)
+			}
+		}
+	}()
+}
+
+// StopWatchdog stops the reconnection watchdog.
+func (m *Manager) StopWatchdog() {
+	select {
+	case <-m.stopCh:
+		// already closed
+	default:
+		close(m.stopCh)
+	}
+}
+
+// reconnectOffline attempts to reconnect any driver whose Status() reports
+// it is not online.
+func (m *Manager) reconnectOffline(ctx context.Context) {
+	m.mu.RLock()
+	drivers := m.drivers
+	m.mu.RUnlock()
+
+	for _, d := range drivers {
+		s, err := d.Status()
+		if err != nil || !s.Online {
+			name := d.Name()
+			log.Printf("[watchdog] %s appears offline, attempting reconnect...", name)
+			// Disconnect first to clean up any stale state
+			_ = d.Disconnect()
+			reconnCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+			if err := d.Connect(reconnCtx); err != nil {
+				log.Printf("[watchdog] %s reconnect failed: %v", name, err)
+			} else {
+				log.Printf("[watchdog] %s reconnected successfully", name)
+			}
+			cancel()
+		}
+	}
 }
 
 // Statuses returns the latest status from every driver.

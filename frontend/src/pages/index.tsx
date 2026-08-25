@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
 import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
 import { Switch } from '../components/Switch'
@@ -11,6 +12,7 @@ import {
   Flame,
   Home,
   Layers,
+  Lightbulb,
   MoreVertical,
   Pause,
   Plus,
@@ -29,6 +31,7 @@ import {
 import { usePrinters } from '../hooks/usePrinters'
 import { useGCodeFiles } from '../hooks/useGCodeFiles'
 import { useCameras } from '../hooks/useCameras'
+import { usePiReadings } from '../hooks/usePi'
 import { isTest } from '../data/mock'
 import { integrationIcons, integrations, testIntegration, type Integration } from '../integrations'
 import type { Camera, GCodeFile, PrintRecord, Printer } from '../types'
@@ -97,8 +100,8 @@ function ConfirmModal({
   onConfirm: () => void
   onClose: () => void
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl shadow-blue-500/20"
         onClick={(e) => e.stopPropagation()}
@@ -120,7 +123,8 @@ function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -317,6 +321,7 @@ export function Dashboard() {
   const [cameraFilter, setCameraFilter] = useState('all')
   const { printers, loading } = usePrinters()
   const { cameras } = useCameras()
+  const { readings: piReadings, toggleLight } = usePiReadings()
   const active = printers.filter((p) => p.status === 'Printing').length
 
   const uniquePrinterIds = [...new Set(cameras.map((c) => c.printerId))]
@@ -324,6 +329,10 @@ export function Dashboard() {
     cameraFilter === 'all'
       ? cameras
       : cameras.filter((c) => c.printerId === cameraFilter)
+
+  const enabledSensors = piReadings?.sensors.filter((s) => s.enabled) ?? []
+  const showLightButton = piReadings?.lightRelayEnabled ?? false
+  const showSensors = enabledSensors.length > 0
 
   if (loading) {
     return (
@@ -339,7 +348,21 @@ export function Dashboard() {
       <SectionTitle
         title="Dashboard"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {showLightButton && (
+              <button
+                onClick={() => toggleLight(!piReadings?.lightRelayOn)}
+                className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                  piReadings?.lightRelayOn
+                    ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/60'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                }`}
+                title={piReadings?.lightRelayOn ? 'Turn light off' : 'Turn light on'}
+              >
+                <Lightbulb className={`h-4 w-4 ${piReadings?.lightRelayOn ? 'fill-amber-400 text-amber-500' : ''}`} />
+                {piReadings?.lightRelayOn ? 'light on' : 'light off'}
+              </button>
+            )}
             <div className="rounded-xl bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
               {active} active print{active !== 1 ? 's' : ''}
             </div>
@@ -349,6 +372,55 @@ export function Dashboard() {
           </div>
         }
       />
+
+      {showSensors && (
+        <div className="space-y-3">
+          <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {enabledSensors.map((s) => (
+              <div
+                key={s.id}
+                className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 rounded-full"
+                      style={{ backgroundColor: s.color || '#64748b' }}
+                    />
+                    <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                      {s.name || `Box ${s.id}`}
+                    </span>
+                  </div>
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                    {s.filamentType || '—'}
+                  </span>
+                </div>
+                {s.error ? (
+                  <p className="font-mono text-xs text-rose-500">{s.error}</p>
+                ) : s.hasReading ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="font-mono text-[10px] uppercase text-slate-400">temp</p>
+                      <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                        {s.temp?.toFixed(1)}°<span className="text-xs text-slate-400">C</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-[10px] uppercase text-slate-400">humidity</p>
+                      <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                        {s.humidity?.toFixed(1)}<span className="text-xs text-slate-400">%</span>
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="font-mono text-xs text-slate-400">waiting for reading...</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {printers.map((p) => (
@@ -424,8 +496,8 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
     return () => window.removeEventListener('keydown', handle)
   }, [onClose])
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 shadow-2xl shadow-blue-500/20"
         onClick={(e) => e.stopPropagation()}
@@ -497,7 +569,8 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
           {tab === 'gcode' && <GCodeView printer={printer} />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -1128,6 +1201,7 @@ const RATES = [
   { label: '2 seconds per interval', value: 2 },
   { label: '5 seconds per interval', value: 5 },
   { label: '10 seconds per interval', value: 10 },
+  { label: '20 seconds per interval', value: 20 },
   { label: '30 seconds per interval', value: 30 },
   { label: '60 seconds per interval', value: 60 },
 ] as const
@@ -1164,6 +1238,7 @@ function CameraCard({
   const [recordInterval, setRecordInterval] = useState(1)
   const [confirmStop, setConfirmStop] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const printer = printers?.find((p: Printer) => p.id === camera.printerId)
   const printerName = printer?.name || ''
@@ -1233,7 +1308,12 @@ function CameraCard({
   return (
     <>
       <Card className="space-y-3">
-        <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-800">
+        <button
+          type="button"
+          onClick={() => camera.url && camera.enabled && setExpanded(true)}
+          className={`relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-800 ${camera.url && camera.enabled ? 'cursor-zoom-in hover:ring-2 hover:ring-blue-500' : 'cursor-default'}`}
+          title={camera.url && camera.enabled ? 'Click to expand' : undefined}
+        >
           {camera.url && camera.enabled ? (
             <img
               src={camera.url}
@@ -1253,7 +1333,7 @@ function CameraCard({
               REC
             </div>
           )}
-        </div>
+        </button>
         <div>
           <div className="flex items-center justify-between">
             <div>
@@ -1326,9 +1406,9 @@ function CameraCard({
         </div>
       </Card>
 
-      {recordOpen && (
+      {recordOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
           onClick={() => !busy && setRecordOpen(false)}
         >
           <div
@@ -1406,12 +1486,13 @@ function CameraCard({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {confirmStop && active && (
+      {confirmStop && active && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
           onClick={() => setConfirmStop(false)}
         >
           <div
@@ -1441,7 +1522,51 @@ function CameraCard({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {expanded && camera.url && camera.enabled && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setExpanded(false)}
+        >
+          <div
+            className="dark flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-3">
+              <div className="flex items-center gap-3">
+                <Video className="h-5 w-5 text-blue-400" />
+                <h2 className="font-mono text-sm font-semibold text-blue-400">[ {camera.name} ]</h2>
+                <span className="font-mono text-xs text-slate-500 capitalize">{camera.type}</span>
+                {active && (
+                  <span className="flex items-center gap-1.5 rounded bg-rose-900/80 px-2 py-0.5 font-mono text-[10px] font-bold text-rose-100 animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-rose-500" />
+                    REC
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="text-slate-400 hover:text-white"
+                title="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex items-center justify-center bg-black p-2">
+              <img
+                src={camera.url}
+                alt={camera.name}
+                className="max-h-[85vh] w-full object-contain"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </>
   )
@@ -1613,7 +1738,7 @@ function CameraModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
@@ -1764,7 +1889,8 @@ function CameraModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -2228,7 +2354,7 @@ export function Recordings() {
         </div>
       )}
 
-      {playing && (
+      {playing && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
           onClick={() => setPlaying(null)}
@@ -2247,10 +2373,11 @@ export function Recordings() {
               Your browser does not support the video tag.
             </video>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {confirmStop && (
+      {confirmStop && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
           onClick={() => setConfirmStop(null)}
@@ -2284,7 +2411,8 @@ export function Recordings() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -2465,7 +2593,7 @@ function AddHistoryModal({
     })
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
@@ -2515,7 +2643,8 @@ function AddHistoryModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -2695,8 +2824,8 @@ function AnkerLoginModal({ open, onClose }: { open: boolean; onClose: () => void
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl shadow-blue-500/20"
         onClick={(e) => e.stopPropagation()}
@@ -2887,7 +3016,8 @@ function AnkerLoginModal({ open, onClose }: { open: boolean; onClose: () => void
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -2948,7 +3078,7 @@ function AddPrinterModal({
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
@@ -3004,7 +3134,8 @@ function AddPrinterModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -3041,8 +3172,8 @@ function IntegrationModal({
   if (!integration) return null
   const ModalIcon = integrationIcons[integration.icon]
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
         className="dark w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -3126,7 +3257,8 @@ function IntegrationModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -3612,44 +3744,57 @@ export function Settings() {
           </div>
         </Card>
         <Card>
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Auto Record</h3>
+          <h3 className="mb-1 font-semibold text-slate-900 dark:text-white">Auto Record</h3>
+          <p className="mb-4 font-mono text-xs text-slate-500 dark:text-slate-400">
+            Automatically start recording when a print begins and stop when it ends.
+            Uses cameras assigned to the printer that support recording (USB / MIPI).
+          </p>
           <div className="space-y-4">
             <label className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
-              Start recording when a print begins
-              <input
-                type="checkbox"
+              <span>Enable auto-record on print start</span>
+              <Switch
                 checked={config.autoRecord.enabled}
-                onChange={(e) => update({ autoRecord: { ...config.autoRecord, enabled: e.target.checked } })}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                onChange={(v) => update({ autoRecord: { ...config.autoRecord, enabled: v } })}
               />
             </label>
-            <label className="block text-sm text-slate-700 dark:text-slate-300">
-              Recording mode
-              <select
-                value={config.autoRecord.mode}
-                onChange={(e) => update({ autoRecord: { ...config.autoRecord, mode: e.target.value as any } })}
-                className={inputClass}
-                disabled={!config.autoRecord.enabled}
-              >
-                <option value="video">Video</option>
-                <option value="timelapse">Timelapse</option>
-              </select>
-            </label>
-            <label className="block text-sm text-slate-700 dark:text-slate-300">
-              Timelapse interval
-              <select
-                value={config.autoRecord.interval}
-                onChange={(e) => update({ autoRecord: { ...config.autoRecord, interval: parseFloat(e.target.value) } })}
-                className={inputClass}
-                disabled={!config.autoRecord.enabled || config.autoRecord.mode !== 'timelapse'}
-              >
-                {RATES.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className={`space-y-4 ${config.autoRecord.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+              <label className="block text-sm text-slate-700 dark:text-slate-300">
+                Recording mode
+                <select
+                  value={config.autoRecord.mode}
+                  onChange={(e) => update({ autoRecord: { ...config.autoRecord, mode: e.target.value as any } })}
+                  className={inputClass}
+                >
+                  <option value="video">Video (continuous)</option>
+                  <option value="timelapse">Timelapse (frame interval)</option>
+                </select>
+              </label>
+              {config.autoRecord.mode === 'timelapse' && (
+                <label className="block text-sm text-slate-700 dark:text-slate-300">
+                  Frame interval (time between captures)
+                  <select
+                    value={config.autoRecord.interval}
+                    onChange={(e) => update({ autoRecord: { ...config.autoRecord, interval: parseFloat(e.target.value) } })}
+                    className={inputClass}
+                  >
+                    {RATES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {config.autoRecord.enabled && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                  <p className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                    {config.autoRecord.mode === 'timelapse'
+                      ? `> timelapse: 1 frame every ${config.autoRecord.interval}s, auto-start on print, auto-stop on finish`
+                      : '> video: continuous recording, auto-start on print, auto-stop on finish'}
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </Card>
         <Card>
@@ -3899,7 +4044,7 @@ export function Pi() {
           </div>
         </Card>
         <Card>
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">DHT11 filament sensors</h3>
+          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">DHT22 filament sensors</h3>
           <div className="space-y-4">
             {settings.filamentSensors.map((s: any) => {
               const r = readings.find((x) => x.id === s.id)

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""DHT11 temperature/humidity sensor driver using the pigpio daemon.
+"""DHT22 temperature/humidity sensor driver using the pigpio daemon.
 
-Reads the DHT11 single-wire protocol through pigpiod, which provides
+Reads the DHT22 (AM2302) single-wire protocol through pigpiod, which provides
 DMA-accurate microsecond edge timestamps and works reliably inside
 Docker containers (where sysfs/mem GPIO access often fails).
 
-This is a vendored replacement for the pigpio example dht11.py, whose
-master version only implements the Python 2 style next() method.
+The DHT22 protocol is similar to DHT11 but sends 16-bit values for
+humidity and temperature (supporting decimals and negative temperatures),
+followed by an 8-bit checksum.
 
 Usage:
     import pigpio
-    from DHT11 import DHT11
+    from DHT22 import DHT22
 
     pi = pigpio.pi()
-    sensor = DHT11(pi, 4)
-    result = sensor.read()  # {"temperature": 22.0, "humidity": 41.0} or None
+    sensor = DHT22(pi, 4)
+    result = sensor.read()  # {"temperature": 22.5, "humidity": 41.2} or None
     sensor.close()
     pi.stop()
 """
@@ -24,8 +25,8 @@ import time
 import pigpio
 
 
-class DHT11(object):
-    """Reads relative humidity and temperature from a DHT11 sensor."""
+class DHT22(object):
+    """Reads relative humidity and temperature from a DHT22/AM2302 sensor."""
 
     def __init__(self, pi, gpio):
         self.pi = pi
@@ -33,7 +34,7 @@ class DHT11(object):
         self._edges = []
         # Reason of the last failed read: "no_signal" (nothing on the pin),
         # "incomplete" (partial response), "checksum" (corrupted data) or
-        # "range" (values outside DHT11 limits). None after a good read.
+        # "range" (values outside DHT22 limits). None after a good read.
         self.status = None
         self.pi.set_pull_up_down(self.gpio, pigpio.PUD_UP)
         self.cb = pi.callback(self.gpio, pigpio.EITHER_EDGE, self._edge)
@@ -43,14 +44,15 @@ class DHT11(object):
         if len(self._edges) > 200:
             del self._edges[:-200]
 
-    def read(self, timeout=0.25):
+    def read(self, timeout=0.5):
         """Trigger one measurement.
 
         Returns {"temperature": t, "humidity": h} (Celsius, %RH) or None
         when the read failed; in that case self.status says why.
         """
         self.status = None
-        # Start pulse: pull the data line low for >=18 ms, then release.
+        # Start pulse: pull the data line low for >=1 ms (DHT22 needs >=1ms,
+        # some datasheets say 18ms for AM2302 — use 20ms to be safe).
         self.pi.set_mode(self.gpio, pigpio.OUTPUT)
         self.pi.write(self.gpio, pigpio.LOW)
         time.sleep(0.020)
@@ -83,6 +85,9 @@ class DHT11(object):
             return None
 
         bits = [1 if w >= 50 else 0 for w in highs[-40:]]
+
+        # DHT22 sends 5 bytes: humidity high, humidity low,
+        # temp high, temp low, checksum
         data = bytearray()
         for i in range(0, 40, 8):
             v = 0
@@ -94,9 +99,16 @@ class DHT11(object):
             self.status = "checksum"
             return None
 
-        humidity = data[0] + (data[1] & 0x0F) / 10.0
-        temperature = data[2] + (data[3] & 0x0F) / 10.0
-        if humidity > 100 or temperature > 60:
+        # DHT22 humidity: 16-bit big-endian, 1 decimal place
+        humidity = ((data[0] << 8) | data[1]) / 10.0
+
+        # DHT22 temperature: 16-bit big-endian, MSB bit 7 = sign
+        temp_raw = ((data[2] & 0x7F) << 8) | data[3]
+        temperature = temp_raw / 10.0
+        if data[2] & 0x80:
+            temperature = -temperature
+
+        if humidity > 100 or temperature > 85 or temperature < -40:
             self.status = "range"
             return None
         return {"temperature": temperature, "humidity": humidity}

@@ -16,7 +16,7 @@ import (
 //go:embed all:scripts
 var scriptsFS embed.FS
 
-// SensorReading holds the latest reading from a DHT11 sensor.
+// SensorReading holds the latest reading from a DHT22 sensor.
 type SensorReading struct {
 	SensorID  int     `json:"sensorId"`
 	Temp      float64 `json:"temp"`
@@ -25,7 +25,7 @@ type SensorReading struct {
 	UpdatedAt int64   `json:"updatedAt"`
 }
 
-// SensorManager periodically reads DHT11 sensors and caches results.
+// SensorManager periodically reads DHT22 sensors and caches results.
 type SensorManager struct {
 	mu            sync.RWMutex
 	readings      map[int]*SensorReading
@@ -88,7 +88,7 @@ func (m *SensorManager) GetReadings() []SensorReading {
 }
 
 func (m *SensorManager) pollLoop() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	// Do an immediate read on start
@@ -118,7 +118,7 @@ func (m *SensorManager) readAll() {
 }
 
 func (m *SensorManager) readSensor(sensor FilamentSensor) {
-	reading := m.readDHT11(sensor.GPIOPin)
+	reading := m.readDHT22(sensor.GPIOPin)
 	reading.SensorID = sensor.ID
 	reading.UpdatedAt = time.Now().Unix()
 
@@ -152,10 +152,10 @@ func (m *SensorManager) findPython() string {
 	return ""
 }
 
-// readDHT11 calls the Python script to read a DHT11 sensor on the given pin.
-func (m *SensorManager) readDHT11(pin int) SensorReading {
+// readDHT22 calls the Python script to read a DHT22 sensor on the given pin.
+func (m *SensorManager) readDHT22(pin int) SensorReading {
 	if runtime.GOOS != "linux" {
-		return SensorReading{Error: "DHT11 sensors require Linux (Raspberry Pi)"}
+		return SensorReading{Error: "DHT22 sensors require Linux (Raspberry Pi)"}
 	}
 
 	pythonExe := m.findPython()
@@ -163,15 +163,15 @@ func (m *SensorManager) readDHT11(pin int) SensorReading {
 		return SensorReading{Error: "Python not installed (install python3 and Adafruit_DHT)"}
 	}
 
-	// Extract embedded Python scripts (reader + vendored DHT11 driver) to a
+	// Extract embedded Python scripts (reader + vendored DHT22 driver) to a
 	// temp directory so the reader can import the driver from alongside itself.
-	tmpDir, err := os.MkdirTemp("", "dht11_*")
+	tmpDir, err := os.MkdirTemp("", "dht22_*")
 	if err != nil {
 		return SensorReading{Error: fmt.Sprintf("create temp dir: %v", err)}
 	}
 	defer os.RemoveAll(tmpDir)
 
-	for _, name := range []string{"dht11_reader.py", "DHT11.py"} {
+	for _, name := range []string{"dht22_reader.py", "DHT22.py"} {
 		data, err := scriptsFS.ReadFile("scripts/" + name)
 		if err != nil {
 			return SensorReading{Error: fmt.Sprintf("read embedded script: %v", err)}
@@ -181,7 +181,7 @@ func (m *SensorManager) readDHT11(pin int) SensorReading {
 		}
 	}
 
-	cmd := exec.Command(pythonExe, filepath.Join(tmpDir, "dht11_reader.py"), fmt.Sprintf("%d", pin))
+	cmd := exec.Command(pythonExe, filepath.Join(tmpDir, "dht22_reader.py"), fmt.Sprintf("%d", pin))
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

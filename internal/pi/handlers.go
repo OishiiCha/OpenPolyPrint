@@ -223,7 +223,7 @@ func handlePiLightToggle(w http.ResponseWriter, r *http.Request, m *ManagerGroup
 	})
 }
 
-// HandleReadings returns the latest DHT11 sensor readings combined with sensor
+// HandleReadings returns the latest DHT22 sensor readings combined with sensor
 // config and relay state. Exposed as a standalone endpoint.
 func HandleReadings(w http.ResponseWriter, r *http.Request, m *ManagerGroup) {
 	if r.Method != http.MethodGet {

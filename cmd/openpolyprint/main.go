@@ -209,7 +209,10 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 					case "Finished":
 						result = "Success"
 					case "Idle":
-						if s.CurrentFile == "" {
+						// If the previous status was Printing at 100% progress,
+						// the print completed even if the driver reports Idle
+						// (some printers keep the file loaded after completion).
+						if prev.Progress >= 100 || s.CurrentFile == "" {
 							result = "Success"
 						} else {
 							result = "Cancelled"
@@ -335,6 +338,7 @@ func main() {
 	go func() {
 		if m := mgr.Load(); m != nil {
 			_ = m.ConnectAll(context.Background())
+			m.Watchdog(context.Background())
 		}
 	}()
 
@@ -502,7 +506,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
 			}()
 		}
 	})
@@ -530,7 +534,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
 			}()
 		}
 	})
@@ -564,7 +568,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
 			}()
 		}
 	})
