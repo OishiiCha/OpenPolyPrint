@@ -4075,12 +4075,23 @@ export function Pi() {
     }
     try {
       const res = await fetch('/api/pi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error('save failed')
+      if (!res.ok) {
+        let msg = 'save failed'
+        try {
+          const data = await res.json()
+          msg = data.error || msg
+        } catch {}
+        throw new Error(msg)
+      }
+      const data = await res.json()
+      if (data.warning) {
+        alert('Settings saved with warning: ' + data.warning)
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       load()
-    } catch (e) {
-      alert('Save failed: ' + e)
+    } catch (e: any) {
+      alert('Save failed: ' + (e?.message || e))
     }
   }
 

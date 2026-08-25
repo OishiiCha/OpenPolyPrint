@@ -2,6 +2,7 @@ package pi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"runtime"
 )
@@ -132,21 +133,28 @@ func handlePiSettingsSet(w http.ResponseWriter, r *http.Request, m *ManagerGroup
 		_ = m.GPIO.Unexport(current.LightRelayGPIO)
 	}
 
-	// Export and configure the new pin if enabled
+	// Export and configure the new pin if enabled. GPIO failures are logged
+	// but do NOT prevent saving the settings — the user may be configuring
+	// pins before hardware is connected, or running in a container where
+	// GPIO isn't available yet.
+	var gpioWarning string
 	if req.LightRelayEnabled && req.LightRelayGPIO > 0 && m.GPIO.IsAvailable() {
 		if err := m.GPIO.Export(req.LightRelayGPIO); err != nil {
-			http.Error(w, `{"error":"Failed to export GPIO pin: `+err.Error()+`"}`, http.StatusInternalServerError)
-			return
+			gpioWarning = "Failed to export GPIO pin: " + err.Error()
+			log.Printf("[pi] warning: %s", gpioWarning)
+		} else if err := m.GPIO.SetDirection(req.LightRelayGPIO, "out"); err != nil {
+			gpioWarning = "Failed to set GPIO direction: " + err.Error()
+			log.Printf("[pi] warning: %s", gpioWarning)
+		} else {
+			val := 0
+			if current.LightRelayOn {
+				val = 1
+			}
+			if err := m.GPIO.Write(req.LightRelayGPIO, val); err != nil {
+				gpioWarning = "Failed to write GPIO: " + err.Error()
+				log.Printf("[pi] warning: %s", gpioWarning)
+			}
 		}
-		if err := m.GPIO.SetDirection(req.LightRelayGPIO, "out"); err != nil {
-			http.Error(w, `{"error":"Failed to set GPIO direction: `+err.Error()+`"}`, http.StatusInternalServerError)
-			return
-		}
-		val := 0
-		if current.LightRelayOn {
-			val = 1
-		}
-		_ = m.GPIO.Write(req.LightRelayGPIO, val)
 	}
 
 	// If disabling, unexport the pin
@@ -179,6 +187,7 @@ func handlePiSettingsSet(w http.ResponseWriter, r *http.Request, m *ManagerGroup
 	json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Pi settings saved",
+		"warning": gpioWarning,
 	})
 }
 
