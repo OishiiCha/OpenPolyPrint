@@ -34,7 +34,7 @@ COPY --from=frontend /app/dist ./frontend/dist
 
 RUN mkdir -p /data
 
-EXPOSE 80
+EXPOSE 8080
 
 ENTRYPOINT ["openpolyprint"]
-CMD ["-addr", "0.0.0.0:80"]
+CMD ["-addr", "0.0.0.0:8080"]

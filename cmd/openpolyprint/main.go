@@ -306,7 +306,7 @@ func findDistDir() string {
 func main() {
 	var (
 		dataDir = flag.String("data-dir", "", "directory that holds ankerctl default.json (default: platform config dir/ankerctl)")
-		addr    = flag.String("addr", ":80", "http listen address for the api")
+		addr    = flag.String("addr", ":8080", "http listen address for the api")
 	)
 	flag.Parse()
 

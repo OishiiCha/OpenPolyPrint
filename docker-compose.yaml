@@ -10,7 +10,7 @@ services:
 
         environment:
             - OPENPOLYPRINT_HOST=0.0.0.0
-            - OPENPOLYPRINT_PORT=80
+            - OPENPOLYPRINT_PORT=8080
             - OPENPOLYPRINT_DATA_DIR=/data
 
         volumes:
@@ -32,7 +32,27 @@ services:
             - "c 189:* rmw"
         privileged: true
 
-        command: ["-addr", "0.0.0.0:80"]
+        command: ["-addr", "0.0.0.0:8080"]
+
+    # Nginx Proxy Manager — provides HTTPS termination and reverse proxy
+    # Admin UI is at http://<host>:81 (default login: admin@example.com / changeme)
+    # Configure a proxy host: domain → host.docker.internal:8080
+    nginx-proxy-manager:
+        image: jc21/nginx-proxy-manager:latest
+        container_name: nginx-proxy-manager
+        restart: unless-stopped
+        ports:
+            - '80:80'     # Public HTTP port for routing/challenges
+            - '443:443'   # Public HTTPS port for secure local traffic
+            - '81:81'     # Admin Web UI port
+        volumes:
+            - npm_data:/data
+            - npm_letsencrypt:/etc/letsencrypt
+        # Allow NPM to reach openpolyprint on the host network (host-mode)
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
 
 volumes:
     openpolyprint_data:
+    npm_data:
+    npm_letsencrypt:
