@@ -21,6 +21,7 @@ export interface AppConfig {
   showMiniTerminal: boolean
   slicerTarget: string
   geminiApiKey: string
+  geminiEnabled: boolean
   notifyFinished: boolean
   notifyFailed: boolean
   providers: {
@@ -66,6 +67,7 @@ export function defaultConfig(): AppConfig {
     showMiniTerminal: false,
     slicerTarget: '',
     geminiApiKey: '',
+    geminiEnabled: false,
     notifyFinished: true,
     notifyFailed: true,
     providers: {

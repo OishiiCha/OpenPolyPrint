@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Sparkles, Loader2 } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { Play, Pause, SkipBack, SkipForward, Sparkles, Loader2, Layers, Images } from 'lucide-react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
@@ -46,6 +46,26 @@ export function PrintPlayer({
   const [analyzing, setAnalyzing] = useState(false)
   const [analysis, setAnalysis] = useState<string | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const [selectedFrameIdx, setSelectedFrameIdx] = useState<number | null>(null)
+  const [showFrames, setShowFrames] = useState(true)
+
+  // Compute unique layers and their time ranges from segments
+  const layerInfo = useMemo(() => {
+    if (segments.length === 0) return []
+    const map = new Map<number, { start: number; end: number; count: number }>()
+    for (const seg of segments) {
+      const existing = map.get(seg.layer)
+      if (existing) {
+        existing.end = seg.elapsedTime
+        existing.count++
+      } else {
+        map.set(seg.layer, { start: seg.elapsedTime, end: seg.elapsedTime, count: 1 })
+      }
+    }
+    return Array.from(map.entries())
+      .map(([layer, info]) => ({ layer, ...info }))
+      .sort((a, b) => a.layer - b.layer)
+  }, [segments])
 
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -326,6 +346,34 @@ export function PrintPlayer({
   const handleScrub = (prog: number) => {
     setProgress(prog)
     playProgressRef.current = prog
+    setSelectedFrameIdx(null) // clear manual frame selection when scrubbing
+    updateVisualization(prog)
+  }
+
+  // Jump to a specific frame by index
+  const jumpToFrame = (idx: number) => {
+    if (frameList.length === 0) return
+    const clampedIdx = Math.max(0, Math.min(idx, frameList.length - 1))
+    setSelectedFrameIdx(clampedIdx)
+    setPlaying(false)
+    // Calculate progress from frame index
+    const elapsed = clampedIdx * intervalSec
+    const prog = totalTime > 0 ? Math.min(elapsed / totalTime, 1) : 0
+    setProgress(prog)
+    playProgressRef.current = prog
+    updateVisualization(prog)
+  }
+
+  // Jump to a specific layer
+  const jumpToLayer = (layer: number) => {
+    const info = layerInfo.find((l) => l.layer === layer)
+    if (!info || totalTime <= 0) return
+    // Jump to the start of the layer
+    const prog = Math.min(info.start / totalTime, 1)
+    setPlaying(false)
+    setSelectedFrameIdx(null)
+    setProgress(prog)
+    playProgressRef.current = prog
     updateVisualization(prog)
   }
 
@@ -340,6 +388,7 @@ export function PrintPlayer({
     setAnalysisError(null)
     try {
       const elapsedSec = progress * totalTime
+      const frameNum = selectedFrameIdx !== null ? selectedFrameIdx + 1 : undefined
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -351,6 +400,7 @@ export function PrintPlayer({
           gcodeId,
           printerName,
           filename,
+          ...(frameNum ? { frameNum } : {}),
         }),
       })
       if (!res.ok) {
@@ -487,6 +537,82 @@ export function PrintPlayer({
         )}
       </div>
 
+      {/* Frame gallery + layer selector */}
+      <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Images className="h-5 w-5 text-blue-500" />
+            <h3 className="font-semibold text-slate-900 dark:text-white">Frames</h3>
+            <span className="font-mono text-xs text-slate-400">
+              {frameList.length} frames · {layerInfo.length} layers
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Layer selector */}
+            {layerInfo.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-slate-400" />
+                <select
+                  value={currentSegment?.layer ?? 0}
+                  onChange={(e) => jumpToLayer(parseInt(e.target.value))}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  {layerInfo.map((l) => (
+                    <option key={l.layer} value={l.layer}>
+                      Layer {l.layer} ({l.count} moves)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={() => setShowFrames(!showFrames)}
+              className="rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              {showFrames ? 'Hide' : 'Show'} gallery
+            </button>
+          </div>
+        </div>
+
+        {showFrames && frameList.length > 0 && (
+          <div className="grid max-h-64 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+            {frameList.map((frame, idx) => {
+              const frameUrl = `/recordings/timelapse/${timelapseDir}/${frame}`
+              const isSelected = selectedFrameIdx === idx
+              const isCurrent = !isSelected && currentFrame === frameUrl
+              return (
+                <button
+                  key={frame}
+                  onClick={() => jumpToFrame(idx)}
+                  className={`relative aspect-video overflow-hidden rounded-lg border-2 transition-all ${
+                    isSelected
+                      ? 'border-purple-500 ring-2 ring-purple-500/30'
+                      : isCurrent
+                        ? 'border-blue-500'
+                        : 'border-slate-200 hover:border-blue-400 dark:border-slate-700'
+                  }`}
+                  title={`Frame ${idx + 1} · ${formatTime(idx * intervalSec)}`}
+                >
+                  <img
+                    src={frameUrl}
+                    alt={`Frame ${idx + 1}`}
+                    loading="lazy"
+                    className="h-full w-full object-cover"
+                  />
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-center font-mono text-[8px] text-white">
+                    {idx + 1}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {showFrames && frameList.length === 0 && (
+          <p className="font-mono text-xs text-slate-400">No frames in this timelapse.</p>
+        )}
+      </div>
+
       {/* AI Analysis */}
       <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
         <div className="mb-3 flex items-center justify-between">
@@ -501,8 +627,10 @@ export function PrintPlayer({
           >
             {analyzing ? (
               <><Loader2 className="h-4 w-4 animate-spin" /> Analyzing...</>
+            ) : selectedFrameIdx !== null ? (
+              <><Sparkles className="h-4 w-4" /> Analyze frame {selectedFrameIdx + 1}</>
             ) : (
-              <><Sparkles className="h-4 w-4" /> Analyze this frame</>
+              <><Sparkles className="h-4 w-4" /> Analyze current frame</>
             )}
           </button>
         </div>
