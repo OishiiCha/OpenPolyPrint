@@ -61,7 +61,42 @@ func (m *Manager) sendWithConfig(id string, cfg map[string]string, message strin
 		return SendTelegram(cfg, message)
 	case "discord":
 		return SendDiscord(cfg, message)
+	case "n8n":
+		return SendN8n(cfg, "message", message)
 	default:
 		return fmt.Errorf("integration %s has no sender yet", id)
+	}
+}
+
+// SendEvent dispatches an event (e.g. "start", "complete", "fail") to all
+// integrations that are configured. Telegram and Discord receive a text
+// message; n8n receives a JSON payload with the event type so it can filter.
+func (m *Manager) SendEvent(event, message string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for id, cfg := range m.configs {
+		if cfg == nil {
+			continue
+		}
+		switch id {
+		case "telegram":
+			if cfg["token"] != "" && cfg["chat_id"] != "" {
+				if err := SendTelegram(cfg, message); err != nil {
+					fmt.Printf("[integration] telegram send failed: %v\n", err)
+				}
+			}
+		case "discord":
+			if cfg["webhook_url"] != "" {
+				if err := SendDiscord(cfg, message); err != nil {
+					fmt.Printf("[integration] discord send failed: %v\n", err)
+				}
+			}
+		case "n8n":
+			if cfg["webhook_url"] != "" {
+				if err := SendN8n(cfg, event, message); err != nil {
+					fmt.Printf("[integration] n8n send failed: %v\n", err)
+				}
+			}
+		}
 	}
 }

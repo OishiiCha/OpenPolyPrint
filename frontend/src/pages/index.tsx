@@ -2893,7 +2893,7 @@ function AnkerLoginModal({ open, onClose }: { open: boolean; onClose: () => void
                 </div>
               </div>
             ) : tab === 'login' ? (
-              <form onSubmit={handleLogin} className="space-y-4">
+              <form onSubmit={handleLogin} className="sensitive space-y-4">
                 <input
                   type="email"
                   placeholder="Email"
@@ -3107,14 +3107,14 @@ function AddPrinterModal({
             placeholder="Host / IP (optional)"
             value={host}
             onChange={(e) => setHost(e.target.value)}
-            className={inputClass}
+            className={`${inputClass} sensitive`}
           />
           <input
             type="text"
             placeholder="API key (optional)"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            className={inputClass}
+            className={`${inputClass} sensitive`}
           />
           <p className="font-mono text-xs text-slate-500">
             For AnkerMake printers, log in via Settings to auto-discover.
@@ -3218,7 +3218,7 @@ function IntegrationModal({
         </div>
 
         {integration.fields.length > 0 && (
-          <div className="space-y-4">
+          <div className="sensitive space-y-4">
             {integration.fields.map((f) => (
               <div key={f.id}>
                 <label className="mb-1 block font-mono text-xs text-slate-400">{f.label}</label>
@@ -3454,6 +3454,7 @@ export function Settings() {
   const [ankerLoginOpen, setAnkerLoginOpen] = useState(false)
   const [anker, setAnker] = useState<AnkerConfig | null>(null)
   const [integrationOpen, setIntegrationOpen] = useState<string | null>(null)
+  const { printers } = usePrinters()
 
   const setUnsaved = () => setDirty(true)
 
@@ -3471,7 +3472,13 @@ export function Settings() {
   }
 
   const handleSave = () => {
-    saveConfig(config)
+    // Merge with the latest localStorage config so changes made outside
+    // the Settings page (e.g. mini terminal toggle on the Terminal page)
+    // are not overwritten by stale state.
+    const latest = loadConfig()
+    const merged = { ...latest, ...config }
+    saveConfig(merged)
+    setConfig(merged)
     setDirty(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
@@ -3500,26 +3507,8 @@ export function Settings() {
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
 
   return (
-    <div className="space-y-6">
-      <SectionTitle
-        title="Settings"
-        action={
-          <div className="flex items-center gap-3">
-            {dirty && !saved && (
-              <span className="text-sm font-medium text-amber-600 dark:text-amber-400">Unsaved changes</span>
-            )}
-            {saved && (
-              <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Saved</span>
-            )}
-            <button
-              onClick={handleSave}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-500"
-            >
-              Save settings
-            </button>
-          </div>
-        }
-      />
+    <div className={`space-y-6 ${dirty && !saved ? 'rounded-xl outline-2 outline-amber-500/60 outline-dashed' : ''}`}>
+      <SectionTitle title="Settings" />
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Appearance</h3>
@@ -3542,7 +3531,47 @@ export function Settings() {
                 className="h-4 w-4 rounded border-slate-300 text-blue-600"
               />
             </label>
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+              <label className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
+                <div>
+                  <span className="font-medium">Screenshot mode</span>
+                  <p className="mt-0.5 font-mono text-xs text-slate-500 dark:text-slate-400">
+                    Blurs sensitive info (passwords, tokens, IPs, account details) for safe screenshots
+                  </p>
+                </div>
+                <Switch
+                  checked={config.screenshotMode}
+                  onChange={(v) => {
+                    update({ screenshotMode: v })
+                    // Apply immediately so the blur takes effect without
+                    // needing to click Save. handleSave merges with latest
+                    // localStorage so this won't be overwritten.
+                    const cfg = loadConfig()
+                    saveConfig({ ...cfg, screenshotMode: v })
+                  }}
+                />
+              </label>
+            </div>
           </div>
+        </Card>
+        <Card>
+          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the OctoPrint API,
+            it goes to this printer by default. You can also override per-upload by using
+            <code className="mx-1 rounded bg-slate-100 px-1 dark:bg-slate-800">/api/files/{"{printer_name}"}/local</code>
+            as the upload URL.
+          </p>
+          <select
+            value={config.slicerTarget}
+            onChange={(e) => update({ slicerTarget: e.target.value })}
+            className={inputClass}
+          >
+            <option value="">Auto (first available printer)</option>
+            {printers.map((p) => (
+              <option key={p.id} value={p.name}>{p.name}</option>
+            ))}
+          </select>
         </Card>
         <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Notifications</h3>
@@ -3578,7 +3607,7 @@ export function Settings() {
             >
               {anker?.account ? (
                 <div className="space-y-4">
-                  <div className="rounded border border-slate-700 bg-slate-950 p-3 font-mono text-xs text-slate-300">
+                  <div className="sensitive rounded border border-slate-700 bg-slate-950 p-3 font-mono text-xs text-slate-300">
                     <h4 className="mb-2 font-semibold text-blue-400">AnkerMake M5C Config</h4>
                     <p className="mb-1 text-slate-400">Account:</p>
                     <div className="mb-3 pl-2 text-slate-300">
@@ -3858,6 +3887,34 @@ export function Settings() {
           })
         }}
       />
+
+      {createPortal(
+        <div className="fixed bottom-6 right-6 z-[9999] flex items-center gap-3">
+          {dirty && !saved && (
+            <span className="rounded-lg bg-amber-500/90 px-3 py-2 font-mono text-xs font-medium text-white shadow-lg">
+              unsaved changes
+            </span>
+          )}
+          {saved && (
+            <span className="rounded-lg bg-emerald-600/90 px-3 py-2 font-mono text-xs font-medium text-white shadow-lg">
+              saved
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            className={`flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold shadow-xl transition-all ${
+              dirty && !saved
+                ? 'bg-amber-500 text-white hover:bg-amber-400 ring-4 ring-amber-500/30'
+                : saved
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                  : 'bg-blue-600 text-white hover:bg-blue-500'
+            }`}
+          >
+            {dirty && !saved ? 'Save changes' : saved ? 'Saved' : 'Save settings'}
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -4113,14 +4170,6 @@ export function Help() {
             Multi-vendor 3D printer control built from the Anker protocol code. Designed for desktop first.
           </p>
           <p className="mt-2 text-xs text-slate-400">Version 0.1.0 · Prototype</p>
-        </Card>
-        <Card>
-          <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">Keyboard shortcuts</h3>
-          <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-            <li className="flex justify-between"><span>Dashboard</span> <kbd className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800">Ctrl + 1</kbd></li>
-            <li className="flex justify-between"><span>Printers</span> <kbd className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800">Ctrl + 2</kbd></li>
-            <li className="flex justify-between"><span>G-code</span> <kbd className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800">Ctrl + 3</kbd></li>
-          </ul>
         </Card>
         <Card>
           <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">Anker M5 and M5C MQTT command types</h3>

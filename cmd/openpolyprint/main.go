@@ -102,6 +102,19 @@ func loadAutoRecord(path string) autoRecordConfig {
 	return out
 }
 
+// loadSlicerTarget reads the configured default printer for slicer uploads.
+func loadSlicerTarget(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		SlicerTarget string `json:"slicerTarget"`
+	}
+	_ = json.Unmarshal(data, &cfg)
+	return cfg.SlicerTarget
+}
+
 func safeName(s string) string {
 	s = strings.ReplaceAll(s, "/", "_")
 	s = strings.ReplaceAll(s, "\\", "_")
@@ -166,7 +179,7 @@ func stopAutoRecord(cameraMgr *cameras.Manager, printerID string, auto map[strin
 }
 
 // trackHistory watches printer statuses, records finished prints, and triggers auto-recording.
-func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string) {
+func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager) {
 	last := map[string]printers.Status{}
 	started := map[string]time.Time{}
 	autoRecordings := map[string]bool{}
@@ -506,7 +519,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()) }()
 			}()
 		}
 	})
@@ -534,7 +547,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()) }()
 			}()
 		}
 	})
@@ -568,7 +581,7 @@ func main() {
 				if oldMgr != nil {
 					go func() { _ = oldMgr.DisconnectAll() }()
 				}
-				go func() { _ = newMgr.ConnectAll(context.Background()); newMgr.Watchdog(context.Background()) }()
+				go func() { _ = newMgr.ConnectAll(context.Background()) }()
 			}()
 		}
 	})
@@ -692,6 +705,268 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
+
+	// ─── OctoPrint-compatible API ──────────────────────────────────────────
+	// These endpoints allow slicers (PrusaSlicer, OrcaSlicer, Cura) to upload
+	// G-code and start prints. Routing to a specific printer is done via:
+	//   1. POST /api/files/{printerName}/local — explicit printer in path
+	//   2. POST /api/files/local — uses the configured "slicer target" printer
+
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"api":    "0.1",
+			"server": "2.0.0",
+			"text":   "OpenPolyPrint OctoPrint-compatible API",
+		})
+	})
+
+	mux.HandleFunc("/api/connection", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"current": map[string]string{"state": "Operational"},
+			"options": map[string]any{
+				"ports":           []string{"VIRTUAL"},
+				"baudrates":       []int{0},
+				"printerProfiles": []map[string]string{{"id": "default", "name": "OpenPolyPrint"}},
+				"autoconnect":     false,
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/printer", func(w http.ResponseWriter, r *http.Request) {
+		target := loadSlicerTarget(settingsFile)
+		var status printers.Status
+		if target != "" {
+			if d := mgr.Load().FindByName(target); d != nil {
+				status, _ = d.Status()
+			}
+		}
+		if status.ID == "" {
+			statuses := mgr.Load().Statuses()
+			if len(statuses) > 0 {
+				status = statuses[0]
+			}
+		}
+		stateText := "Offline"
+		if status.Online {
+			switch status.StatusText {
+			case "Printing":
+				stateText = "Printing"
+			case "Paused":
+				stateText = "Paused"
+			default:
+				stateText = "Operational"
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"state": map[string]string{"text": stateText},
+			"temperature": map[string]any{
+				"tool0": map[string]float64{"actual": status.Temps.Nozzle, "target": status.Temps.TargetNozzle, "offset": 0},
+				"bed":   map[string]float64{"actual": status.Temps.Bed, "target": status.Temps.TargetBed, "offset": 0},
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/job", func(w http.ResponseWriter, r *http.Request) {
+		target := loadSlicerTarget(settingsFile)
+		var status printers.Status
+		if target != "" {
+			if d := mgr.Load().FindByName(target); d != nil {
+				status, _ = d.Status()
+			}
+		}
+		if status.ID == "" {
+			statuses := mgr.Load().Statuses()
+			if len(statuses) > 0 {
+				status = statuses[0]
+			}
+		}
+		stateText := "Offline"
+		if status.Online {
+			switch status.StatusText {
+			case "Printing":
+				stateText = "Printing"
+			case "Paused":
+				stateText = "Paused"
+			default:
+				stateText = "Operational"
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"job": map[string]any{
+				"file":               map[string]any{"name": status.CurrentFile, "origin": "local", "size": 0, "date": 0},
+				"estimatedPrintTime": 0,
+			},
+			"progress": map[string]any{
+				"completion":    float64(status.Progress),
+				"filepos":       0,
+				"printTime":     0,
+				"printTimeLeft": 0,
+			},
+			"state": stateText,
+		})
+	})
+
+	// OctoPrint file upload: POST /api/files/local or POST /api/files/{printer}/local
+	mux.HandleFunc("/api/files/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse path: /api/files/{printer}/local or /api/files/local
+		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/")
+		var printerName, action string
+		if len(pathParts) >= 2 && pathParts[0] != "local" {
+			printerName = pathParts[0]
+			action = pathParts[1]
+		} else if len(pathParts) >= 1 {
+			action = pathParts[0]
+		}
+
+		// If action is "local", this is an upload. Otherwise it's a file select.
+		if action == "local" {
+			// File upload via multipart form
+			if err := r.ParseMultipartForm(500 << 20); err != nil {
+				http.Error(w, `{"error":"failed to parse multipart form"}`, http.StatusBadRequest)
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, `{"error":"no file in form"}`, http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			data, err := io.ReadAll(file)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read file"}`, http.StatusBadRequest)
+				return
+			}
+
+			// Resolve target printer
+			m := mgr.Load()
+			var driver printers.Driver
+			if printerName != "" {
+				driver = m.FindByName(printerName)
+			}
+			if driver == nil {
+				target := loadSlicerTarget(settingsFile)
+				if target != "" {
+					driver = m.FindByName(target)
+				}
+			}
+			if driver == nil {
+				// Fall back to first available printer
+				for _, d := range m.Drivers() {
+					driver = d
+					break
+				}
+			}
+			if driver == nil {
+				http.Error(w, `{"error":"no printer available"}`, http.StatusNotFound)
+				return
+			}
+
+			filename := header.Filename
+			if filename == "" {
+				filename = "upload.gcode"
+			}
+
+			// Upload to printer
+			if err := driver.UploadGCode(r.Context(), filename, data); err != nil {
+				log.Printf("[slicer] upload %s to %s failed: %v", filename, driver.Name(), err)
+				http.Error(w, fmt.Sprintf(`{"error":"upload failed: %s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			log.Printf("[slicer] uploaded %s (%d bytes) to %s", filename, len(data), driver.Name())
+
+			// Check if the slicer requested to start printing immediately
+			printNow := r.FormValue("print") == "true"
+			if printNow {
+				if err := driver.StartPrint(r.Context(), filename); err != nil {
+					log.Printf("[slicer] start print %s on %s failed: %v", filename, driver.Name(), err)
+				} else {
+					log.Printf("[slicer] started print %s on %s", filename, driver.Name())
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"files": map[string]any{
+					"local": map[string]any{
+						"name":   filename,
+						"origin": "local",
+						"size":   len(data),
+						"type":   "machinecode",
+					},
+				},
+				"done": true,
+			})
+			return
+		}
+
+		// File select: POST /api/files/{printer}/{filename} with {"command":"select","print":true}
+		// or POST /api/files/{filename} with {"command":"select","print":true}
+		var req struct {
+			Command string `json:"command"`
+			Print   bool   `json:"print"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Command != "select" {
+			http.Error(w, `{"error":"unsupported command"}`, http.StatusBadRequest)
+			return
+		}
+
+		// The filename is the last path segment
+		fileToPrint := pathParts[len(pathParts)-1]
+		if printerName == "" {
+			// If no printer in path, the first segment is the filename
+			fileToPrint = pathParts[0]
+		}
+
+		m := mgr.Load()
+		var driver printers.Driver
+		if printerName != "" {
+			driver = m.FindByName(printerName)
+		}
+		if driver == nil {
+			target := loadSlicerTarget(settingsFile)
+			if target != "" {
+				driver = m.FindByName(target)
+			}
+		}
+		if driver == nil {
+			for _, d := range m.Drivers() {
+				driver = d
+				break
+			}
+		}
+		if driver == nil {
+			http.Error(w, `{"error":"no printer available"}`, http.StatusNotFound)
+			return
+		}
+
+		if req.Print {
+			if err := driver.StartPrint(r.Context(), fileToPrint); err != nil {
+				log.Printf("[slicer] start print %s on %s failed: %v", fileToPrint, driver.Name(), err)
+				http.Error(w, fmt.Sprintf(`{"error":"start print failed: %s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			log.Printf("[slicer] started print %s on %s", fileToPrint, driver.Name())
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{})
+	})
+
 	mux.HandleFunc("/api/printers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
@@ -717,7 +992,13 @@ func main() {
 				return
 			}
 			mgr.Store(buildManager(cfg))
-			go mgr.Load().ConnectAll(context.Background())
+			go func() {
+				m := mgr.Load()
+				if m != nil {
+					_ = m.ConnectAll(context.Background())
+					m.Watchdog(context.Background())
+				}
+			}()
 			_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -929,7 +1210,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile)
+	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr)
 
 	// Serve the built frontend if dist/ exists next to the binary.
 	dist := findDistDir()
@@ -941,7 +1222,36 @@ func main() {
 			r.URL.Path = "/"
 			fs.ServeHTTP(w, r)
 		})
+		// Serve manifest.json with the correct MIME type for PWA install prompts.
+		mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/manifest+json")
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(dist, "manifest.json"))
+		})
+		// Serve service worker with correct scope and no cache.
+		mux.HandleFunc("/sw.js", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Service-Worker-Allowed", "/")
+			http.ServeFile(w, r, filepath.Join(dist, "sw.js"))
+		})
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set correct MIME types for common static files
+			ext := filepath.Ext(r.URL.Path)
+			switch ext {
+			case ".json":
+				w.Header().Set("Content-Type", "application/json")
+			case ".js":
+				w.Header().Set("Content-Type", "application/javascript")
+			case ".css":
+				w.Header().Set("Content-Type", "text/css")
+			case ".svg":
+				w.Header().Set("Content-Type", "image/svg+xml")
+			case ".png":
+				w.Header().Set("Content-Type", "image/png")
+			case ".webmanifest":
+				w.Header().Set("Content-Type", "application/manifest+json")
+			}
 			if _, err := os.Stat(filepath.Join(dist, r.URL.Path)); os.IsNotExist(err) {
 				r.URL.Path = "/"
 			}

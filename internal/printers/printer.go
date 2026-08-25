@@ -53,4 +53,11 @@ type Driver interface {
 	Cooldown(ctx context.Context) error
 	AutoLevel(ctx context.Context) error
 	SendGCode(ctx context.Context, command string) error
+	// UploadGCode sends a G-code file to the printer. The filename is the
+	// user-facing name (e.g. "benchy.gcode") and data is the raw file content.
+	// Returns nil on success.
+	UploadGCode(ctx context.Context, filename string, data []byte) error
+	// StartPrint begins printing a file that has already been uploaded to
+	// the printer. The filename should match what was passed to UploadGCode.
+	StartPrint(ctx context.Context, filename string) error
 }

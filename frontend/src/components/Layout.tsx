@@ -77,7 +77,7 @@ function MiniTerminal() {
   }, [lines])
 
   return (
-    <div className="flex h-40 flex-col border-t border-slate-200 bg-slate-900 dark:border-slate-800">
+    <div className="sensitive flex h-40 flex-col border-t border-slate-200 bg-slate-900 dark:border-slate-800">
       <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5">
         <span className="font-mono text-xs text-slate-400">mini_log</span>
         <Link to="/terminal" className="font-mono text-xs text-blue-400 hover:underline">
@@ -105,6 +105,7 @@ function MiniTerminal() {
 export function Layout() {
   const [isDark, setIsDark] = useState(() => loadConfig().dark)
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
+  const [screenshotMode, setScreenshotMode] = useState(() => loadConfig().screenshotMode)
   const { canInstall, promptInstall } = usePWAInstall()
 
   useEffect(() => {
@@ -116,10 +117,19 @@ export function Layout() {
   }, [isDark])
 
   useEffect(() => {
+    if (screenshotMode) {
+      document.documentElement.classList.add('screenshot-mode')
+    } else {
+      document.documentElement.classList.remove('screenshot-mode')
+    }
+  }, [screenshotMode])
+
+  useEffect(() => {
     const handler = () => {
       const cfg = loadConfig()
       setIsDark(cfg.dark)
       setShowMini(cfg.showMiniTerminal)
+      setScreenshotMode(cfg.screenshotMode)
     }
     window.addEventListener('openpolyprint-config-updated', handler)
     return () => window.removeEventListener('openpolyprint-config-updated', handler)
@@ -134,6 +144,14 @@ export function Layout() {
             OpenPolyPrint
           </span>
         </Link>
+
+        {screenshotMode && (
+          <div className="mx-3 mb-2 rounded-lg bg-amber-100 px-3 py-2 dark:bg-amber-900/40">
+            <p className="font-mono text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+              screenshot mode active — sensitive info is blurred
+            </p>
+          </div>
+        )}
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
           {navItems.map((item) => (

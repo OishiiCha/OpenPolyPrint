@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -208,6 +209,45 @@ func (m *Manager) SendGCode(ctx context.Context, id string, command string) erro
 		return fmt.Errorf("printer not found: %s", id)
 	}
 	return d.SendGCode(ctx, command)
+}
+
+// UploadGCode sends a G-code file to the requested printer.
+func (m *Manager) UploadGCode(ctx context.Context, id string, filename string, data []byte) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.UploadGCode(ctx, filename, data)
+}
+
+// StartPrint begins printing a previously uploaded file on the requested printer.
+func (m *Manager) StartPrint(ctx context.Context, id string, filename string) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.StartPrint(ctx, filename)
+}
+
+// FindByName returns the driver with the given printer name (case-insensitive).
+func (m *Manager) FindByName(name string) Driver {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, d := range m.drivers {
+		if strings.EqualFold(d.Name(), name) {
+			return d
+		}
+	}
+	return nil
+}
+
+// Drivers returns the list of all drivers.
+func (m *Manager) Drivers() []Driver {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Driver, len(m.drivers))
+	copy(out, m.drivers)
+	return out
 }
 
 // Add appends a new driver to the manager.

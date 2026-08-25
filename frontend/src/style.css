@@ -54,3 +54,21 @@ h4 {
 .dark ::-webkit-scrollbar-thumb:hover {
   @apply bg-slate-600;
 }
+
+/* Screenshot mode: blur/redact elements marked .sensitive */
+.screenshot-mode .sensitive {
+  filter: blur(6px);
+  user-select: none;
+  cursor: not-allowed;
+}
+
+.screenshot-mode .sensitive input,
+.screenshot-mode .sensitive select,
+.screenshot-mode .sensitive textarea {
+  color: transparent !important;
+  text-shadow: 0 0 8px currentColor;
+}
+
+.screenshot-mode .sensitive img {
+  filter: blur(10px);
+}

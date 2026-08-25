@@ -19,6 +19,8 @@ export interface AppConfig {
   dark: boolean
   compact: boolean
   showMiniTerminal: boolean
+  screenshotMode: boolean
+  slicerTarget: string
   notifyFinished: boolean
   notifyFailed: boolean
   providers: {
@@ -62,6 +64,8 @@ export function defaultConfig(): AppConfig {
     dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
     compact: false,
     showMiniTerminal: false,
+    screenshotMode: false,
+    slicerTarget: '',
     notifyFinished: true,
     notifyFailed: true,
     providers: {

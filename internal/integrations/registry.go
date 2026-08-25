@@ -148,17 +148,4 @@ var Registry = []Integration{
 			{ID: "events", Label: "Events (comma-separated)", Type: "text", Placeholder: "start,complete,fail"},
 		},
 	},
-	{
-		ID:          "timelapse",
-		Name:        "Timelapse",
-		Category:    "Camera",
-		Description: "Auto-capture during print (requires ffmpeg)",
-		LongDesc:    "Automatically capture timelapse videos during prints using the built-in camera. Requires ffmpeg to be installed on the server. Snapshots are taken at regular intervals and compiled into a video.",
-		URL:         "https://ffmpeg.org",
-		URLLabel:    "ffmpeg.org",
-		Fields: []Field{
-			{ID: "interval", Label: "Capture Interval (seconds)", Type: "number", Placeholder: "30"},
-			{ID: "output_dir", Label: "Output Directory", Type: "text", Placeholder: "./timelapses"},
-		},
-	},
 }

@@ -302,3 +302,61 @@ func (d *Driver) AutoLevel(ctx context.Context) error {
 func (d *Driver) SendGCode(ctx context.Context, command string) error {
 	return d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"command": command})
 }
+
+// UploadGCode sends a G-code file to the printer via the PPPP file transfer
+// protocol. If the PPPP LAN connection is not available, it returns an error.
+func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+	if d.api == nil {
+		return errors.New("pppp connection not available for file upload")
+	}
+
+	cleanName := pppp.SanitizeFilename(filename)
+	userID := ""
+	machineID := ""
+	if d.account != nil {
+		userID = d.account.UserID
+		machineID = d.printer.SN
+	}
+
+	// Build file upload info (CSV metadata)
+	info := pppp.FileUploadInfoFromData(data, cleanName, "OpenPolyPrint", userID, machineID, 0)
+
+	// Send FTBegin with file metadata
+	if _, err := d.api.AabbRequest(info.Bytes(), pppp.FTBegin, 0, 2, true); err != nil {
+		return fmt.Errorf("file upload begin: %w", err)
+	}
+
+	// Send file data in chunks
+	const chunkSize = 8192
+	pos := uint32(0)
+	for pos < uint32(len(data)) {
+		end := pos + chunkSize
+		if end > uint32(len(data)) {
+			end = uint32(len(data))
+		}
+		chunk := data[pos:end]
+		if _, err := d.api.AabbRequest(chunk, pppp.FTData, pos, 2, true); err != nil {
+			return fmt.Errorf("file upload data at offset %d: %w", pos, err)
+		}
+		pos = end
+	}
+
+	// Send FTEnd
+	if _, err := d.api.AabbRequest(nil, pppp.FTEnd, uint32(len(data)), 2, true); err != nil {
+		return fmt.Errorf("file upload end: %w", err)
+	}
+
+	return nil
+}
+
+// StartPrint tells the printer to start printing a file that has already been
+// uploaded. Uses MQTT CmdPrintSchedule to select and start the file.
+func (d *Driver) StartPrint(ctx context.Context, filename string) error {
+	cleanName := pppp.SanitizeFilename(filename)
+	// CmdPrintSchedule (0x03e9) is used to start a print from a file on the
+	// printer's storage. The "schedule" field tells the printer to start now.
+	return d.sendCommand(mqtt.CmdPrintSchedule, map[string]any{
+		"file_name": cleanName,
+		"schedule":  0, // 0 = start immediately
+	})
+}

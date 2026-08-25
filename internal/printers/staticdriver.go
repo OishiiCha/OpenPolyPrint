@@ -84,3 +84,13 @@ func (d *StaticDriver) AutoLevel(ctx context.Context) error {
 func (d *StaticDriver) SendGCode(ctx context.Context, command string) error {
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)
 }
+
+// UploadGCode returns an error for the static driver.
+func (d *StaticDriver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
+
+// StartPrint returns an error for the static driver.
+func (d *StaticDriver) StartPrint(ctx context.Context, filename string) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
