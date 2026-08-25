@@ -1,7 +1,7 @@
 // OpenPolyPrint Service Worker
 // Network-first for everything; cache only used when offline.
 
-const CACHE_NAME = 'openpolyprint-v2';
+const CACHE_NAME = 'openpolyprint-v3';
 
 // Install: skip waiting to activate immediately
 self.addEventListener('install', (event) => {
@@ -14,6 +14,42 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+  );
+});
+
+// Push: show notification when push message received
+self.addEventListener('push', (event) => {
+  let data = { title: 'OpenPolyPrint', body: '', icon: '/icon-192.png', badge: '/icon-192.png' };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch (e) {
+    if (event.data) data.body = event.data.text();
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon,
+      badge: data.badge,
+      data: { url: data.data ? JSON.parse(data.data).url : '/' },
+    })
+  );
+});
+
+// Notification click: focus or open the app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window' })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if (client.url.includes(url) && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        if (clients.openWindow) return clients.openWindow(url);
+      })
   );
 });
 

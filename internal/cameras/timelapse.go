@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,7 @@ type tlRecording struct {
 	cameraID  string
 	rawPath   string
 	outPath   string
+	framesDir string
 	rawFile   *os.File
 	sub       chan []byte
 	interval  time.Duration
@@ -83,6 +85,12 @@ func (rm *TimelapseManager) Start(cameraID string, streamer *UsbCameraStreamer, 
 	base := strings.TrimSuffix(filename, filepath.Ext(filename))
 	rawPath := filepath.Join("recordings/timelapse", base+".mjpeg")
 	outPath := filepath.Join("recordings/timelapse", filename)
+	framesDir := filepath.Join("recordings/timelapse", base+"_frames")
+
+	// Create frames directory for individual JPEG frame extraction
+	if err := os.MkdirAll(framesDir, 0o755); err != nil {
+		return "", fmt.Errorf("create frames dir: %w", err)
+	}
 
 	f, err := os.Create(rawPath)
 	if err != nil {
@@ -95,6 +103,7 @@ func (rm *TimelapseManager) Start(cameraID string, streamer *UsbCameraStreamer, 
 		cameraID:  cameraID,
 		rawPath:   rawPath,
 		outPath:   outPath,
+		framesDir: framesDir,
 		rawFile:   f,
 		sub:       sub,
 		interval:  time.Duration(intervalSeconds * float64(time.Second)),
@@ -150,9 +159,33 @@ func (r *tlRecording) run(streamer *UsbCameraStreamer) {
 				finish(true)
 				return
 			}
-			atomic.AddInt64(&r.frames, 1)
+			frameNum := atomic.AddInt64(&r.frames, 1)
+			// Also save individual frame as JPEG with timestamp metadata
+			r.saveFrame(frame, frameNum)
 		}
 	}
+}
+
+// saveFrame writes an individual frame as a JPEG file with a timestamp-based
+// filename. The frame data from the MJPEG streamer is already JPEG-encoded.
+// A companion .json file is written with metadata (timestamp, frame number,
+// elapsed seconds) for AI analysis.
+func (r *tlRecording) saveFrame(frame []byte, frameNum int64) {
+	elapsed := time.Since(r.startTime).Seconds()
+	timestamp := time.Now().UnixMilli()
+
+	// Save frame as JPEG
+	framePath := filepath.Join(r.framesDir, fmt.Sprintf("frame_%06d.jpg", frameNum))
+	if err := os.WriteFile(framePath, frame, 0o644); err != nil {
+		log.Printf("[timelapse] failed to save frame %d: %v", frameNum, err)
+		return
+	}
+
+	// Save metadata as JSON
+	metaPath := filepath.Join(r.framesDir, fmt.Sprintf("frame_%06d.json", frameNum))
+	meta := fmt.Sprintf(`{"frame":%d,"timestamp":%d,"elapsedSeconds":%.3f,"cameraId":"%s"}`,
+		frameNum, timestamp, elapsed, sanitizeFilename(r.cameraID))
+	_ = os.WriteFile(metaPath, []byte(meta), 0o644)
 }
 
 // convert packages the raw MJPEG frames into a browser-playable MKV file with ffmpeg.
@@ -226,4 +259,41 @@ func (rm *TimelapseManager) Status(cameraID string) TimelapseStatus {
 		NextCapture:     next,
 		ElapsedSeconds:  time.Since(rec.startTime).Seconds(),
 	}
+}
+
+// ListFrameDirs returns the frame directories in recordings/timelapse.
+func ListFrameDirs() ([]string, error) {
+	entries, err := os.ReadDir("recordings/timelapse")
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && strings.HasSuffix(e.Name(), "_frames") {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool { return dirs[i] > dirs[j] })
+	return dirs, nil
+}
+
+// ListFrames returns the JPEG frames in a frame directory.
+func ListFrames(dir string) ([]string, error) {
+	path := filepath.Join("recordings/timelapse", dir)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(strings.ToLower(name), ".jpg") {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }

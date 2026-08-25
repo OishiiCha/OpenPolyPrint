@@ -16,6 +16,10 @@ import {
   Moon,
   Download,
   X,
+  ListOrdered,
+  Package,
+  Plug as PlugIcon,
+  Sparkles,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { usePWAInstall } from '../hooks/usePWAInstall'
@@ -24,6 +28,10 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/printers', label: 'Printers', icon: Printer },
   { to: '/gcode', label: 'G-code', icon: FileCode2 },
+  { to: '/queue', label: 'Queue', icon: ListOrdered },
+  { to: '/filament', label: 'Filament', icon: Package },
+  { to: '/plugs', label: 'Plugs', icon: PlugIcon },
+  { to: '/analysis', label: 'Analysis', icon: Sparkles },
   { to: '/cameras', label: 'Cameras', icon: Video },
   { to: '/recordings', label: 'Recordings', icon: Film },
   { to: '/pi', label: 'Pi', icon: Cpu },

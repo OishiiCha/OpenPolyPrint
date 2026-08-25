@@ -16,6 +16,12 @@ import {
   Help,
 } from './pages'
 import { Recordings } from './pages/Recordings'
+import { BedLeveling } from './pages/BedLeveling'
+import { PrintQueue } from './pages/PrintQueue'
+import { Filament } from './pages/Filament'
+import { SmartPlugs } from './pages/SmartPlugs'
+import { PrintAnalysis } from './pages/PrintAnalysis'
+import { BackgroundStreams } from './components/BackgroundStreams'
 
 function useIsPhone() {
   const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 767px)').matches)
@@ -34,6 +40,7 @@ function App() {
   if (isPhone) {
     return (
       <BrowserRouter>
+        <BackgroundStreams />
         <PhoneLayout>
           <Routes>
             <Route index element={<Dashboard />} />
@@ -45,14 +52,19 @@ function App() {
 
   return (
     <BrowserRouter>
+      <BackgroundStreams />
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="printers" element={<Printers />} />
           <Route path="printers/:id" element={<PrinterDetail />} />
-          <Route path="printers/:id/leveling" element={<div className="p-8 text-center">Bed Leveling</div>} />
+          <Route path="printers/:id/leveling" element={<BedLeveling />} />
           <Route path="gcode" element={<GCode />} />
           <Route path="gcode/:id" element={<GCodeDetail />} />
+          <Route path="queue" element={<PrintQueue />} />
+          <Route path="filament" element={<Filament />} />
+          <Route path="plugs" element={<SmartPlugs />} />
+          <Route path="analysis" element={<PrintAnalysis />} />
           <Route path="cameras" element={<Cameras />} />
           <Route path="recordings" element={<Recordings />} />
           <Route path="pi" element={<Pi />} />

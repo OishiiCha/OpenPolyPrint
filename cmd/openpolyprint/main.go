@@ -16,15 +16,21 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lucas/openpolyprint/internal/ai"
 	"github.com/lucas/openpolyprint/internal/anker"
 	"github.com/lucas/openpolyprint/internal/anker/proto/config"
 	"github.com/lucas/openpolyprint/internal/cameras"
+	"github.com/lucas/openpolyprint/internal/filament"
 	"github.com/lucas/openpolyprint/internal/gcode"
 	"github.com/lucas/openpolyprint/internal/history"
 	"github.com/lucas/openpolyprint/internal/integrations"
 	"github.com/lucas/openpolyprint/internal/logstore"
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
+	"github.com/lucas/openpolyprint/internal/push"
+	"github.com/lucas/openpolyprint/internal/queue"
+	"github.com/lucas/openpolyprint/internal/smartplug"
+	"github.com/lucas/openpolyprint/internal/tempstore"
 )
 
 type headerTransport struct {
@@ -179,7 +185,7 @@ func stopAutoRecord(cameraMgr *cameras.Manager, printerID string, auto map[strin
 }
 
 // trackHistory watches printer statuses, records finished prints, and triggers auto-recording.
-func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager) {
+func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager) {
 	last := map[string]printers.Status{}
 	started := map[string]time.Time{}
 	autoRecordings := map[string]bool{}
@@ -196,6 +202,7 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 			}
 			cfg := loadAutoRecord(settingsFile)
 			for _, s := range m.Statuses() {
+				tempStore.Record(s.ID, s.Temps.Nozzle, s.Temps.TargetNozzle, s.Temps.Bed, s.Temps.TargetBed)
 				prev, hasPrev := last[s.ID]
 				if s.StatusText == "Printing" {
 					if _, ok := started[s.ID]; !ok {
@@ -233,12 +240,42 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 					case "Error", "Offline":
 						result = "Failed"
 					default:
-						// Paused or transient — don’t record yet
+						// Paused or transient â€” donâ€™t record yet
 						last[s.ID] = s
 						continue
 					}
 					store.Add(s.Name, file, result, start, time.Now())
 					delete(started, s.ID)
+
+					// Send push notification
+					switch result {
+					case "Success":
+						pushMgr.Send("Print finished", s.Name+": "+file+" completed successfully")
+					case "Failed":
+						pushMgr.Send("Print failed", s.Name+": "+file+" failed")
+					case "Cancelled":
+						pushMgr.Send("Print cancelled", s.Name+": "+file+" was cancelled")
+					}
+
+					// Auto-off smart plugs for this printer
+					if result == "Success" {
+						plugMgr.AutoOffForPrinter(s.ID)
+					}
+
+					// Auto-start next queued item for this printer
+					if result == "Success" || result == "Cancelled" {
+						if next := queueStore.NextPending(s.ID); next != nil {
+							queueStore.UpdateStatus(next.ID, "printing", "")
+							if d := m.Find(s.ID); d != nil {
+								if err := d.StartPrint(ctx, next.Filename); err != nil {
+									log.Printf("[queue] auto-start %s on %s failed: %v", next.Filename, s.Name, err)
+									queueStore.UpdateStatus(next.ID, "failed", err.Error())
+								} else {
+									log.Printf("[queue] auto-started %s on %s", next.Filename, s.Name)
+								}
+							}
+						}
+					}
 				}
 				last[s.ID] = s
 			}
@@ -311,6 +348,11 @@ func main() {
 	}
 
 	historyStore := history.NewStore(settingsDir)
+	tempStore := tempstore.New(600)
+	queueStore := queue.NewStore(settingsDir)
+	filamentStore := filament.NewStore(settingsDir)
+	plugMgr := smartplug.NewManager()
+	pushMgr := push.NewManager(settingsDir)
 
 	cameraMgr := cameras.NewManager(settingsDir)
 	piMgr := pi.NewManagerGroup(settingsDir)
@@ -442,6 +484,155 @@ func main() {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
+
+	// G-code timeline — returns timestamped segments for visualization sync
+	mux.HandleFunc("/api/gcode/{id}/timeline", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		segments, err := gcodeStore.Timeline(id)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(segments)
+	})
+
+	// Timelapse frames — list frame directories and individual frames
+	mux.HandleFunc("/api/timelapse-frames", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		dirs, err := cameras.ListFrameDirs()
+		if err != nil {
+			http.Error(w, `{"error":"failed to list frames"}`, http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(dirs)
+	})
+
+	mux.HandleFunc("/api/timelapse-frames/{dir}", func(w http.ResponseWriter, r *http.Request) {
+		dir := r.PathValue("dir")
+		frames, err := cameras.ListFrames(dir)
+		if err != nil {
+			http.Error(w, `{"error":"failed to list frames"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(frames)
+	})
+
+	// AI analysis — analyze a timelapse frame with G-code + temp context using Gemini
+	mux.HandleFunc("/api/ai/analyze", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			APIKey      string  `json:"apiKey"`
+			FrameDir    string  `json:"frameDir"`
+			FrameNum    int     `json:"frameNum"`
+			ElapsedSec  float64 `json:"elapsedSec"`
+			IntervalSec float64 `json:"intervalSec"`
+			GCodeID     string  `json:"gcodeId"`
+			PrinterName string  `json:"printerName"`
+			Filename    string  `json:"filename"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Find the frame file
+		framesDir := filepath.Join("recordings", "timelapse", req.FrameDir)
+		var framePath string
+		var frameNum int
+		if req.FrameNum > 0 {
+			framePath = filepath.Join(framesDir, fmt.Sprintf("frame_%06d.jpg", req.FrameNum))
+			frameNum = req.FrameNum
+		} else {
+			fp, fn, err := ai.FindFrameForTime(framesDir, req.ElapsedSec, req.IntervalSec)
+			if err != nil {
+				http.Error(w, `{"error":"frame not found: `+err.Error()+`"}`, http.StatusNotFound)
+				return
+			}
+			framePath = fp
+			frameNum = fn
+		}
+
+		// Get G-code timeline segment at this time
+		var gcodeSnippet string
+		var layer int
+		var x, y, z float64
+		if req.GCodeID != "" {
+			segments, err := gcodeStore.Timeline(req.GCodeID)
+			if err == nil && len(segments) > 0 {
+				seg := gcode.SegmentAtTime(segments, req.ElapsedSec)
+				if seg != nil {
+					layer = seg.Layer
+					x, y, z = seg.X, seg.Y, seg.Z
+					// Build snippet: 5 lines before and after
+					startLine := seg.LineNum - 5
+					if startLine < 1 {
+						startLine = 1
+					}
+					endLine := seg.LineNum + 5
+					data, _ := gcodeStore.Load(req.GCodeID)
+					lines := strings.Split(string(data), "\n")
+					if endLine > len(lines) {
+						endLine = len(lines)
+					}
+					if startLine <= len(lines) {
+						gcodeSnippet = strings.Join(lines[startLine-1:endLine], "\n")
+					}
+				}
+			}
+		}
+
+		// Get temperature at this time from tempstore
+		var nozzleTemp, targetNozzle, bedTemp, targetBed float64
+		// Get the most recent temperature sample (we don't have print start time
+		// to correlate elapsed time precisely, so latest is best approximation)
+		allTemps := tempStore.GetAll()
+		for _, samples := range allTemps {
+			if len(samples) > 0 {
+				last := samples[len(samples)-1]
+				nozzleTemp = last.Nozzle
+				targetNozzle = last.TargetNozzle
+				bedTemp = last.Bed
+				targetBed = last.TargetBed
+			}
+			break
+		}
+
+		analysisReq := ai.AnalysisRequest{
+			APIKey:       req.APIKey,
+			FramePath:    framePath,
+			FrameDir:     req.FrameDir,
+			FrameNum:     frameNum,
+			ElapsedSec:   req.ElapsedSec,
+			GCodeLine:    0,
+			GCodeSnippet: gcodeSnippet,
+			Layer:        layer,
+			X:            x,
+			Y:            y,
+			Z:            z,
+			NozzleTemp:   nozzleTemp,
+			TargetNozzle: targetNozzle,
+			BedTemp:      bedTemp,
+			TargetBed:    targetBed,
+			PrinterName:  req.PrinterName,
+			Filename:     req.Filename,
+		}
+
+		result, err := ai.Analyze(analysisReq)
+		if err != nil {
+			log.Printf("[ai] analysis failed: %v", err)
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
+	})
+
 	cameras.Mount(mux, cameraMgr)
 	pi.Mount(mux, piMgr)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
@@ -706,11 +897,11 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
-	// ─── OctoPrint-compatible API ──────────────────────────────────────────
+	// â”€â”€â”€ OctoPrint-compatible API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// These endpoints allow slicers (PrusaSlicer, OrcaSlicer, Cura) to upload
 	// G-code and start prints. Routing to a specific printer is done via:
-	//   1. POST /api/files/{printerName}/local — explicit printer in path
-	//   2. POST /api/files/local — uses the configured "slicer target" printer
+	//   1. POST /api/files/{printerName}/local â€” explicit printer in path
+	//   2. POST /api/files/local â€” uses the configured "slicer target" printer
 
 	// corsMiddleware adds CORS headers for browser-based slicer plugins.
 	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
@@ -847,7 +1038,7 @@ func main() {
 		})
 	}))
 
-	// /api/files (without trailing slash) — return empty file list
+	// /api/files (without trailing slash) â€” return empty file list
 	mux.HandleFunc("/api/files", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -866,7 +1057,7 @@ func main() {
 			return
 		}
 
-		// GET /api/files or /api/files/local — return empty file list
+		// GET /api/files or /api/files/local â€” return empty file list
 		// (slicers often probe this before uploading)
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
@@ -882,10 +1073,10 @@ func main() {
 		}
 
 		// Parse path. OctoPrint paths we support:
-		//   POST /api/files/local                      → upload to default printer
-		//   POST /api/files/{printer}/local            → upload to specific printer
-		//   POST /api/files/local/{filename}           → select/start print (standard OctoPrint)
-		//   POST /api/files/{printer}/local/{filename} → select/start on specific printer
+		//   POST /api/files/local                      â†’ upload to default printer
+		//   POST /api/files/{printer}/local            â†’ upload to specific printer
+		//   POST /api/files/local/{filename}           â†’ select/start print (standard OctoPrint)
+		//   POST /api/files/{printer}/local/{filename} â†’ select/start on specific printer
 		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/")
 
 		var printerName string
@@ -893,17 +1084,17 @@ func main() {
 		var fileToPrint string
 
 		if len(pathParts) == 1 && pathParts[0] == "local" {
-			// /api/files/local → upload
+			// /api/files/local â†’ upload
 			isUpload = true
 		} else if len(pathParts) == 2 && pathParts[1] == "local" {
-			// /api/files/{printer}/local → upload
+			// /api/files/{printer}/local â†’ upload
 			printerName = pathParts[0]
 			isUpload = true
 		} else if len(pathParts) == 2 && pathParts[0] == "local" {
-			// /api/files/local/{filename} → select (standard OctoPrint)
+			// /api/files/local/{filename} â†’ select (standard OctoPrint)
 			fileToPrint = pathParts[1]
 		} else if len(pathParts) == 3 && pathParts[1] == "local" {
-			// /api/files/{printer}/local/{filename} → select on specific printer
+			// /api/files/{printer}/local/{filename} â†’ select on specific printer
 			printerName = pathParts[0]
 			fileToPrint = pathParts[2]
 		} else if len(pathParts) >= 1 {
@@ -1038,6 +1229,213 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{})
+	})
+
+	// â”€â”€â”€ Smart Plug API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	mux.HandleFunc("/api/push/vapid-key", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"key": pushMgr.VapidPublicKey()})
+	})
+
+	mux.HandleFunc("/api/push/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var sub push.Subscription
+		if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		pushMgr.AddSubscription(sub)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/api/push/unsubscribe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Endpoint string `json:"endpoint"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		pushMgr.RemoveSubscription(req.Endpoint)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/api/plugs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(plugMgr.List())
+		case http.MethodPost:
+			var plug smartplug.Plug
+			if err := json.NewDecoder(r.Body).Decode(&plug); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			created := plugMgr.Add(plug)
+			_ = json.NewEncoder(w).Encode(created)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/plugs/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/plugs/")
+		if id == "" {
+			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodDelete:
+			if !plugMgr.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodPost:
+			var req struct {
+				On bool `json:"on"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if err := plugMgr.SetOn(id, req.On); err != nil {
+				log.Printf("[smartplug] set %s on=%v failed: %v", id, req.On, err)
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	// â”€â”€â”€ Filament API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	mux.HandleFunc("/api/filament", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(filamentStore.List())
+		case http.MethodPost:
+			var spool filament.Spool
+			if err := json.NewDecoder(r.Body).Decode(&spool); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			created := filamentStore.Add(spool)
+			_ = json.NewEncoder(w).Encode(created)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/filament/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/filament/")
+		if id == "" {
+			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPut:
+			var spool filament.Spool
+			if err := json.NewDecoder(r.Body).Decode(&spool); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !filamentStore.Update(id, spool) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(spool)
+		case http.MethodDelete:
+			if !filamentStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/temps", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tempStore.GetAll())
+	})
+
+	// â”€â”€â”€ Print Queue API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	mux.HandleFunc("/api/queue", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(queueStore.List())
+		case http.MethodPost:
+			var req struct {
+				PrinterID string `json:"printerId"`
+				Filename  string `json:"filename"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if req.PrinterID == "" || req.Filename == "" {
+				http.Error(w, `{"error":"printerId and filename required"}`, http.StatusBadRequest)
+				return
+			}
+			item := queueStore.Add(req.PrinterID, req.Filename)
+			_ = json.NewEncoder(w).Encode(item)
+		case http.MethodDelete:
+			queueStore.ClearAll()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/queue/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/queue/")
+		if id == "" {
+			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodDelete:
+			queueStore.Remove(id)
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodPost:
+			// Start a queued item manually
+			if d := mgr.Load().Find(id); d != nil {
+				// Find the queue item by looking through the list
+				for _, item := range queueStore.List() {
+					if item.ID == id && item.Status == "pending" {
+						queueStore.UpdateStatus(id, "printing", "")
+						if err := d.StartPrint(r.Context(), item.Filename); err != nil {
+							queueStore.UpdateStatus(id, "failed", err.Error())
+							http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+							return
+						}
+						_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+						return
+					}
+				}
+			}
+			http.Error(w, `{"error":"queue item not found or printer unavailable"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/temps/", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			id = strings.TrimPrefix(r.URL.Path, "/api/temps/")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tempStore.Get(id))
 	})
 
 	mux.HandleFunc("/api/printers", func(w http.ResponseWriter, r *http.Request) {
@@ -1283,7 +1681,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr)
+	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr)
 
 	// Serve the built frontend if dist/ exists next to the binary.
 	dist := findDistDir()

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // File is the JSON representation of a stored G-code file.
@@ -166,6 +167,16 @@ func (s *Store) Load(id string) ([]byte, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 	return data, nil
+}
+
+// Timeline parses a G-code file and returns timestamped segments for
+// visualization and AI analysis.
+func (s *Store) Timeline(id string) ([]Segment, error) {
+	data, err := s.Load(id)
+	if err != nil {
+		return nil, err
+	}
+	return ParseTimeline(strings.NewReader(string(data)))
 }
 
 // Delete removes a G-code file by id (filename).

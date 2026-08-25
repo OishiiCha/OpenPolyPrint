@@ -50,6 +50,7 @@ type UsbCameraStreamer struct {
 	lastFrameAt time.Time
 	fpsEst      float64
 	lastErr     string
+	lastFrame   []byte // most recent frame, for instant subscriber pickup
 }
 
 // NewUsbCameraStreamer creates a new streamer for the given USB camera config.
@@ -95,11 +96,22 @@ func (u *UsbCameraStreamer) Stop() {
 
 // Subscribe returns a channel that receives JPEG frames.
 // The caller must call Unsubscribe when done to avoid resource leaks.
+// If a frame has already been received, it is sent immediately so the
+// subscriber sees an image without waiting for the next ffmpeg frame.
 func (u *UsbCameraStreamer) Subscribe() chan []byte {
 	sub := make(chan []byte, 32)
 	u.mu.Lock()
 	u.subscribers = append(u.subscribers, sub)
+	last := u.lastFrame
 	u.mu.Unlock()
+	// Send the last frame immediately if we have one, so the subscriber
+	// gets an instant first image instead of waiting for the next frame.
+	if last != nil {
+		select {
+		case sub <- last:
+		default:
+		}
+	}
 	return sub
 }
 
@@ -389,6 +401,7 @@ func (u *UsbCameraStreamer) runCommand(name string, args []string, isAlt bool) e
 		}
 		u.lastFrameAt = now
 		u.lastErr = ""
+		u.lastFrame = frame
 		u.mu.Unlock()
 		u.broadcast(frame)
 	}

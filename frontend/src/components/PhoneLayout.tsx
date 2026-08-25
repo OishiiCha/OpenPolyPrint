@@ -10,6 +10,7 @@ import {
   Moon,
   Download,
   X,
+  Bell as BellIcon,
   Play,
   Pause,
   Square,
@@ -23,6 +24,7 @@ import { usePWAInstall } from '../hooks/usePWAInstall'
 import { useCameras } from '../hooks/useCameras'
 import { usePrinters } from '../hooks/usePrinters'
 import { usePiReadings } from '../hooks/usePi'
+import { usePushNotifications } from '../hooks/usePushNotifications'
 import type { Printer } from '../types'
 
 type Tab = 'dashboard' | 'cameras' | 'printer' | 'settings'
@@ -486,6 +488,7 @@ function PrinterCard({ printer }: { printer: Printer }) {
 
 function PhoneSettings({ isDark }: { isDark: boolean }) {
   const { canInstall, canInstallManual, promptInstall, installed } = usePWAInstall()
+  const push = usePushNotifications()
   const [showInstallGuide, setShowInstallGuide] = useState(false)
 
   const toggle = (key: 'dark', value: boolean) => {
@@ -521,6 +524,22 @@ function PhoneSettings({ isDark }: { isDark: boolean }) {
             <div className="flex items-center gap-3">
               <Download className="h-5 w-5" />
               <span className="font-mono text-sm">Install app</span>
+            </div>
+          </button>
+        )}
+
+        {/* Push notifications */}
+        {push.supported && (
+          <button
+            onClick={() => push.subscribed ? push.unsubscribe() : push.subscribe()}
+            className="flex w-full items-center justify-between rounded-2xl border border-slate-200 p-4 dark:border-slate-800"
+          >
+            <div className="flex items-center gap-3">
+              <BellIcon className="h-5 w-5 text-slate-600 dark:text-slate-400" />
+              <span className="font-mono text-sm text-slate-900 dark:text-white">Push notifications</span>
+            </div>
+            <div className={`h-6 w-11 rounded-full transition-colors ${push.subscribed ? 'bg-blue-600' : 'bg-slate-300'}`}>
+              <div className={`h-5 w-5 rounded-full bg-white transition-transform ${push.subscribed ? 'translate-x-5' : 'translate-x-0.5'} mt-0.5`} />
             </div>
           </button>
         )}
