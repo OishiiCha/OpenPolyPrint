@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -1765,18 +1766,70 @@ func main() {
 				log.Printf("[tls] certificate ready at %s (signed by local CA: %s)", certPath, caCertPath)
 			}
 
-			// Endpoint to download the CA certificate for browser/system trust
+			// Auto-install CA into the local system trust store (where the app runs)
+			if !tlsautocert.IsCAInstalledInSystemStore() {
+				if err := tlsautocert.InstallCAToSystemStore(caCertPath); err != nil {
+					log.Printf("[tls] could not auto-install CA to system store: %v (clients can install via /api/tls/install)", err)
+				} else {
+					log.Printf("[tls] CA auto-installed to local system trust store")
+				}
+			}
+
+			// Endpoint to download the CA certificate
 			mux.HandleFunc("/api/tls/ca", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/x-pem-file")
 				w.Header().Set("Content-Disposition", "attachment; filename=openpolyprint-ca.pem")
 				http.ServeFile(w, r, caCertPath)
 			})
 
+			// Endpoints to download platform-specific installer scripts
+			mux.HandleFunc("/api/tls/install/windows", func(w http.ResponseWriter, r *http.Request) {
+				host := r.Host
+				if host == "" {
+					host = "localhost"
+				}
+				// Strip port if present
+				if h, _, err := net.SplitHostPort(host); err == nil {
+					host = h
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename=install-openpolyprint-ca.bat")
+				fmt.Fprint(w, tlsautocert.WindowsInstallScript(host))
+			})
+
+			mux.HandleFunc("/api/tls/install/mac", func(w http.ResponseWriter, r *http.Request) {
+				host := r.Host
+				if host == "" {
+					host = "localhost"
+				}
+				if h, _, err := net.SplitHostPort(host); err == nil {
+					host = h
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename=install-openpolyprint-ca.sh")
+				fmt.Fprint(w, tlsautocert.MacInstallScript(host))
+			})
+
+			mux.HandleFunc("/api/tls/install/linux", func(w http.ResponseWriter, r *http.Request) {
+				host := r.Host
+				if host == "" {
+					host = "localhost"
+				}
+				if h, _, err := net.SplitHostPort(host); err == nil {
+					host = h
+				}
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Disposition", "attachment; filename=install-openpolyprint-ca.sh")
+				fmt.Fprint(w, tlsautocert.LinuxInstallScript(host))
+			})
+
 			tlsServer = &http.Server{Addr: tlsAddr, Handler: mux}
 			go func() {
 				fmt.Printf("OpenPolyPrint listening on https://localhost%s\n", tlsAddr)
-				fmt.Printf("  self-signed certificate — install the CA to trust it:\n")
-				fmt.Printf("    download: http://localhost/api/tls/ca\n")
+				fmt.Printf("  CA auto-installed on this host. For other devices:\n")
+				fmt.Printf("    Windows: http://localhost/api/tls/install/windows\n")
+				fmt.Printf("    macOS:   http://localhost/api/tls/install/mac\n")
+				fmt.Printf("    Linux:   http://localhost/api/tls/install/linux\n")
 				if err := tlsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
 					log.Fatalf("[https] server on %s: %v", tlsAddr, err)
 				}

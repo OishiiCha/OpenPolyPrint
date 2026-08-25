@@ -12,7 +12,9 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -63,6 +65,201 @@ func EnsureCertificate(certDir string) (certPath, keyPath, caCertPath string, re
 
 	log.Printf("[tls] generated server certificate: %s (signed by CA: %s)", certPath, caCertPath)
 	return certPath, keyPath, caCertPath, true, nil
+}
+
+// InstallCAToSystemStore installs the CA certificate into the local
+// system's trust store so that tools like curl, wget, and (on Linux)
+// browsers using the system store will trust the HTTPS certificate
+// without warnings.
+//
+// This installs on the HOST where the app is running (e.g. the Pi).
+// Client devices need to use the installer scripts served by the app.
+func InstallCAToSystemStore(caCertPath string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return installCALinux(caCertPath)
+	case "darwin":
+		return installCADarwin(caCertPath)
+	case "windows":
+		return installCAWindows(caCertPath)
+	default:
+		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+	}
+}
+
+func installCALinux(caCertPath string) error {
+	// Debian/Ubuntu: /usr/local/share/ca-certificates/ + update-ca-certificates
+	// Alpine: /usr/local/share/ca-certificates/ + update-ca-certificates
+	// RHEL/Fedora: /etc/pki/ca-trust/source/anchors/ + update-ca-trust
+	destDir := "/usr/local/share/ca-certificates"
+	cmdName := "update-ca-certificates"
+
+	// Check if update-ca-trust exists (RHEL/Fedora)
+	if _, err := exec.LookPath("update-ca-trust"); err == nil {
+		destDir = "/etc/pki/ca-trust/source/anchors"
+		cmdName = "update-ca-trust"
+	}
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("create CA dir: %w", err)
+	}
+
+	// Copy the CA cert (must have .crt extension on Debian)
+	dest := filepath.Join(destDir, "openpolyprint-ca.crt")
+	data, err := os.ReadFile(caCertPath)
+	if err != nil {
+		return fmt.Errorf("read CA cert: %w", err)
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return fmt.Errorf("write CA cert to %s: %w", dest, err)
+	}
+
+	// Run the update command
+	cmd := exec.Command(cmdName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w", cmdName, err)
+	}
+
+	log.Printf("[tls] CA installed to system trust store: %s", dest)
+	return nil
+}
+
+func installCADarwin(caCertPath string) error {
+	// macOS: add to System keychain
+	cmd := exec.Command("security", "add-trusted-cert", "-d", "-r", "trustRoot",
+		"-k", "/Library/Keychains/System.keychain", caCertPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("security add-trusted-cert: %w", err)
+	}
+	log.Printf("[tls] CA installed to macOS System keychain")
+	return nil
+}
+
+func installCAWindows(caCertPath string) error {
+	// Windows: certutil -addstore Root <path>
+	cmd := exec.Command("certutil", "-addstore", "Root", caCertPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("certutil -addstore Root: %w", err)
+	}
+	log.Printf("[tls] CA installed to Windows Trusted Root store")
+	return nil
+}
+
+// IsCAInstalledInSystemStore checks whether the CA is already in the
+// system trust store (best-effort, returns false if not sure).
+func IsCAInstalledInSystemStore() bool {
+	switch runtime.GOOS {
+	case "linux":
+		// Check if the file exists in the common locations
+		candidates := []string{
+			"/usr/local/share/ca-certificates/openpolyprint-ca.crt",
+			"/etc/pki/ca-trust/source/anchors/openpolyprint-ca.crt",
+		}
+		for _, p := range candidates {
+			if _, err := os.Stat(p); err == nil {
+				return true
+			}
+		}
+		return false
+	case "darwin":
+		// Check if the cert is in the keychain (best-effort)
+		cmd := exec.Command("security", "find-certificate", "-c", "OpenPolyPrint Local CA", "/Library/Keychains/System.keychain")
+		return cmd.Run() == nil
+	case "windows":
+		cmd := exec.Command("certutil", "-verify", "OpenPolyPrint Local CA")
+		return cmd.Run() == nil
+	}
+	return false
+}
+
+// WindowsInstallScript returns a .bat script that downloads the CA cert
+// from the server and installs it into the Windows Trusted Root store.
+func WindowsInstallScript(host string) string {
+	return fmt.Sprintf(`@echo off
+echo ============================================
+echo  OpenPolyPrint CA Certificate Installer
+echo ============================================
+echo.
+echo Downloading CA certificate from %s...
+powershell -Command "Invoke-WebRequest -Uri 'http://%s/api/tls/ca' -OutFile '%%TEMP%%\openpolyprint-ca.pem'"
+if errorlevel 1 (
+    echo Failed to download CA certificate.
+    pause
+    exit /b 1
+)
+echo.
+echo Installing CA certificate to Trusted Root store...
+echo (This may prompt for administrator privileges)
+certutil -addstore -f Root "%%TEMP%%\openpolyprint-ca.pem"
+if errorlevel 1 (
+    echo.
+    echo Trying with current user store...
+    certutil -user -addstore -f Root "%%TEMP%%\openpolyprint-ca.pem"
+)
+echo.
+echo Done! Restart your browser for the change to take effect.
+pause
+`, host, host)
+}
+
+// MacInstallScript returns a shell script that downloads and installs
+// the CA cert into the macOS System keychain.
+func MacInstallScript(host string) string {
+	return fmt.Sprintf(`#!/bin/bash
+echo "============================================"
+echo " OpenPolyPrint CA Certificate Installer"
+echo "============================================"
+echo
+echo "Downloading CA certificate from %s..."
+curl -s -o /tmp/openpolyprint-ca.pem http://%s/api/tls/ca
+if [ $? -ne 0 ]; then
+    echo "Failed to download CA certificate."
+    exit 1
+fi
+echo
+echo "Installing CA certificate to System keychain..."
+echo "(This may prompt for your password)"
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/openpolyprint-ca.pem
+echo
+echo "Done! Restart your browser for the change to take effect."
+`, host, host)
+}
+
+// LinuxInstallScript returns a shell script that downloads and installs
+// the CA cert into the Linux system trust store.
+func LinuxInstallScript(host string) string {
+	return fmt.Sprintf(`#!/bin/bash
+echo "============================================"
+echo " OpenPolyPrint CA Certificate Installer"
+echo "============================================"
+echo
+echo "Downloading CA certificate from %s..."
+curl -s -o /tmp/openpolyprint-ca.pem http://%s/api/tls/ca
+if [ $? -ne 0 ]; then
+    echo "Failed to download CA certificate."
+    exit 1
+fi
+echo
+echo "Installing CA certificate to system trust store..."
+if command -v update-ca-certificates &> /dev/null; then
+    sudo cp /tmp/openpolyprint-ca.pem /usr/local/share/ca-certificates/openpolyprint-ca.crt
+    sudo update-ca-certificates
+elif command -v update-ca-trust &> /dev/null; then
+    sudo cp /tmp/openpolyprint-ca.pem /etc/pki/ca-trust/source/anchors/openpolyprint-ca.crt
+    sudo update-ca-trust
+else
+    echo "Unknown CA management tool. Please install the certificate manually."
+    exit 1
+fi
+echo
+echo "Done! Restart your browser for the change to take effect."
+`, host, host)
 }
 
 // ensureCA loads or generates the local root CA.

@@ -569,6 +569,63 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
   )
 }
 
+function JogControls({ jog, home }: { jog: (axis: string, dist: number, feed: number) => void; home: () => void }) {
+  const [step, setStep] = useState(10)
+  const zStep = step >= 10 ? Math.round(step / 2) : 1
+  const xyFeed = 3000
+  const zFeed = 600
+
+  const btn = 'flex items-center justify-center rounded-lg bg-slate-100 text-lg font-bold text-slate-700 hover:bg-blue-100 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-blue-900/40 dark:hover:text-blue-300 transition-colors'
+
+  return (
+    <div className="flex flex-wrap items-start gap-8">
+      {/* XY D-pad */}
+      <div className="flex flex-col items-center gap-1">
+        <span className="mb-1 font-mono text-xs text-slate-400">XY</span>
+        <div className="grid grid-cols-3 grid-rows-3 gap-1">
+          <div />
+          <button onClick={() => jog('Y', step, xyFeed)} className={`${btn} h-12 w-12`} title={`Y+${step}`}>▲</button>
+          <div />
+          <button onClick={() => jog('X', -step, xyFeed)} className={`${btn} h-12 w-12`} title={`X-${step}`}>◀</button>
+          <button onClick={home} className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600" title="Home all">⌂</button>
+          <button onClick={() => jog('X', step, xyFeed)} className={`${btn} h-12 w-12`} title={`X+${step}`}>▶</button>
+          <div />
+          <button onClick={() => jog('Y', -step, xyFeed)} className={`${btn} h-12 w-12`} title={`Y-${step}`}>▼</button>
+          <div />
+        </div>
+      </div>
+
+      {/* Z up/down */}
+      <div className="flex flex-col items-center gap-1">
+        <span className="mb-1 font-mono text-xs text-slate-400">Z</span>
+        <div className="flex flex-col gap-1">
+          <button onClick={() => jog('Z', zStep, zFeed)} className={`${btn} h-12 w-24`} title={`Z+${zStep}`}>▲ Z+</button>
+          <button onClick={() => jog('Z', -zStep, zFeed)} className={`${btn} h-12 w-24`} title={`Z-${zStep}`}>▼ Z-</button>
+        </div>
+      </div>
+
+      {/* Step size selector */}
+      <div className="flex flex-col gap-2">
+        <span className="font-mono text-xs text-slate-400">step (mm)</span>
+        <div className="flex flex-wrap gap-1">
+          {[1, 5, 10, 25, 50, 100].map((s) => (
+            <button
+              key={s}
+              onClick={() => setStep(s)}
+              className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${step === s ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 font-mono text-[10px] text-slate-500">
+          XY: ±{step}mm · Z: ±{zStep}mm
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[] }) {
   const post = async (path: string, body?: object) => {
     try {
@@ -674,23 +731,7 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
 
       <Card>
         <h3 className="mb-4 font-mono font-semibold text-blue-400">[ jog_controls ]</h3>
-        <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
-          {['-X', '+X', '-Y', '+Y', '-Z', '+Z'].map((axis) => (
-            <button
-              key={axis}
-              onClick={() => {
-                const dir = axis[0] === '+' ? 1 : -1
-                const a = axis[1]
-                const dist = a === 'Z' ? 5 * dir : 10 * dir
-                const feed = a === 'Z' ? 600 : 3000
-                jog(a, dist, feed)
-              }}
-              className="rounded-lg bg-slate-100 px-4 py-6 text-lg font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            >
-              {axis}
-            </button>
-          ))}
-        </div>
+        <JogControls jog={jog} home={() => post('/home')} />
       </Card>
     </div>
   )
@@ -3604,24 +3645,45 @@ export function Settings() {
         <Card>
           <h3 className="mb-2 font-semibold text-slate-900 dark:text-white">HTTPS / TLS Certificate</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            The server uses a local CA to sign its HTTPS certificate. To remove
-            browser security warnings, download the CA certificate and install it
-            in your system or browser trust store.
+            The server auto-installs its CA certificate on the host it runs on.
+            For other devices on your network, download and run the installer
+            for your platform to trust the HTTPS certificate.
           </p>
           <div className="flex flex-wrap gap-2">
             <a
-              href="/api/tls/ca"
-              download="openpolyprint-ca.pem"
+              href="/api/tls/install/windows"
+              download="install-openpolyprint-ca.bat"
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
             >
-              Download CA certificate
+              Windows installer (.bat)
+            </a>
+            <a
+              href="/api/tls/install/mac"
+              download="install-openpolyprint-ca.sh"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
+            >
+              macOS installer (.sh)
+            </a>
+            <a
+              href="/api/tls/install/linux"
+              download="install-openpolyprint-ca.sh"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
+            >
+              Linux installer (.sh)
+            </a>
+            <a
+              href="/api/tls/ca"
+              download="openpolyprint-ca.pem"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              CA cert only (.pem)
             </a>
           </div>
           <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
-            <p className="font-semibold text-slate-600 dark:text-slate-300">Install instructions:</p>
-            <p><strong>Windows:</strong> Double-click the .pem file → "Install Certificate" → "Local Machine" → "Place all certificates in: Trusted Root Certification Authorities"</p>
-            <p><strong>macOS:</strong> Double-click → Keychain Access → Find "OpenPolyPrint Local CA" → Right-click → "Get Info" → Trust → "Always Trust"</p>
-            <p><strong>Linux:</strong> <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">sudo cp openpolyprint-ca.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates</code></p>
+            <p><strong>Windows:</strong> Download and double-click the .bat file — it will install the CA and prompt for admin if needed</p>
+            <p><strong>macOS:</strong> Download the .sh file, run <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod +x install-openpolyprint-ca.sh && ./install-openpolyprint-ca.sh</code></p>
+            <p><strong>Linux:</strong> Download the .sh file, run <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod +x install-openpolyprint-ca.sh && sudo ./install-openpolyprint-ca.sh</code></p>
+            <p>After installing, restart your browser for the change to take effect.</p>
           </div>
         </Card>
         <Card>

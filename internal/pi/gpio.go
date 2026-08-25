@@ -239,10 +239,10 @@ func (g *Manager) checkBackends() {
 	g.checked = true
 
 	backend := "none"
-	if g.pigsAvailable {
-		backend = "pigpiod (pigs)"
-	} else if g.lgpioAvailable {
+	if g.lgpioAvailable {
 		backend = "lgpio (python daemon)"
+	} else if g.pigsAvailable {
+		backend = "pigpiod (pigs)"
 	} else if g.libgpiodAvailable {
 		backend = "libgpiod (gpioset/gpioget)"
 	} else if g.sysfsAvailable {
@@ -256,11 +256,13 @@ func (g *Manager) preferredBackend() gpioBackend {
 	if !g.checked {
 		g.checkBackends()
 	}
-	if g.pigsAvailable {
-		return backendPigs
-	}
+	// Prefer lgpio (persistent daemon, ~1ms per call) over pigs
+	// (spawns a new process per call, ~100-200ms overhead)
 	if g.lgpioAvailable {
 		return backendLgpio
+	}
+	if g.pigsAvailable {
+		return backendPigs
 	}
 	if g.libgpiodAvailable {
 		return backendLibgpiod
@@ -309,24 +311,38 @@ func (g *Manager) Export(pin int) error {
 
 	backend := g.preferredBackend()
 	switch backend {
-	case backendPigs:
-		if err := pigsCmd("m", strconv.Itoa(pin), "w"); err != nil {
-			if g.lgpioAvailable {
-				g.pigsAvailable = false
-				return g.exportLgpio(pin)
+	case backendLgpio:
+		if err := g.exportLgpio(pin); err != nil {
+			if g.pigsAvailable {
+				g.lgpioAvailable = false
+				return g.exportPigs(pin)
 			}
 			return err
 		}
-		g.exported[pin] = true
 		return nil
-	case backendLgpio:
-		return g.exportLgpio(pin)
+	case backendPigs:
+		if err := g.exportPigs(pin); err != nil {
+			if g.libgpiodAvailable {
+				g.pigsAvailable = false
+				return g.exportLibgpiod(pin)
+			}
+			return err
+		}
+		return nil
 	case backendLibgpiod:
 		return g.exportLibgpiod(pin)
 	case backendSysfs:
 		return g.exportSysfs(pin)
 	}
 	return fmt.Errorf("no GPIO backend available (install pigpiod, python3-lgpio, or libgpiod; or mount /sys/class/gpio)")
+}
+
+func (g *Manager) exportPigs(pin int) error {
+	if err := pigsCmd("m", strconv.Itoa(pin), "w"); err != nil {
+		return err
+	}
+	g.exported[pin] = true
+	return nil
 }
 
 func (g *Manager) exportLgpio(pin int) error {

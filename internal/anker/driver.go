@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/lucas/openpolyprint/internal/anker/proto/config"
@@ -298,9 +299,20 @@ func (d *Driver) AutoLevel(ctx context.Context) error {
 	return d.sendCommand(mqtt.CmdAutoLeveling, map[string]any{"value": 1})
 }
 
-// SendGCode sends one raw G-code line.
+// SendGCode sends one or more raw G-code lines. Multi-line commands
+// (separated by \n) are split and sent as individual MQTT messages.
 func (d *Driver) SendGCode(ctx context.Context, command string) error {
-	return d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"command": command})
+	lines := strings.Split(command, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if err := d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"command": line}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UploadGCode sends a G-code file to the printer via the PPPP file transfer
