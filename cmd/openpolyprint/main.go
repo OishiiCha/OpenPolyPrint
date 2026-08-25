@@ -1749,5 +1749,6 @@ func main() {
 
 	fmt.Println("\nShutting down...")
 	_ = mgr.Load().DisconnectAll()
+	piMgr.GPIO.Close()
 	_ = server.Close()
 }
