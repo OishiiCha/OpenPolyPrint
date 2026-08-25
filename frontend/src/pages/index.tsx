@@ -183,7 +183,7 @@ function PrinterGCodePreview({ fileName }: { fileName: string }) {
   )
 }
 
-function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => void }) {
+function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: () => void; camera?: Camera }) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
 
@@ -215,7 +215,7 @@ function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => voi
           </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-4">
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
             <Flame className="h-4 w-4 text-rose-500" />
             <div>
@@ -235,6 +235,17 @@ function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => voi
             </div>
           </div>
         </div>
+
+        {camera && camera.url && camera.enabled && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+            <img
+              src={camera.url}
+              alt={camera.name}
+              className="aspect-video w-full object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          </div>
+        )}
 
         {printer.status === 'Printing' && (
           <div className="mt-5">
@@ -320,17 +331,13 @@ function PrinterCard({ printer, onOpen }: { printer: Printer; onOpen?: () => voi
 }
 
 export function Dashboard() {
-  const [cameraFilter, setCameraFilter] = useState('all')
+  const [selected, setSelected] = useState<Printer | null>(null)
   const { printers, loading } = usePrinters()
   const { cameras } = useCameras()
   const { readings: piReadings, toggleLight } = usePiReadings()
   const active = printers.filter((p) => p.status === 'Printing').length
 
-  const uniquePrinterIds = [...new Set(cameras.map((c) => c.printerId))]
-  const filteredCameras =
-    cameraFilter === 'all'
-      ? cameras
-      : cameras.filter((c) => c.printerId === cameraFilter)
+  const unassignedCameras = cameras.filter((c) => !c.printerId)
 
   const enabledSensors = piReadings?.sensors.filter((s) => s.enabled) ?? []
   const showLightButton = piReadings?.lightRelayEnabled ?? false
@@ -375,112 +382,98 @@ export function Dashboard() {
         }
       />
 
-      {showSensors && (
-        <div className="space-y-3">
-          <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {enabledSensors.map((s) => (
-              <div
-                key={s.id}
-                className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
-              >
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 rounded-full"
-                      style={{ backgroundColor: s.color || '#64748b' }}
-                    />
-                    <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
-                      {s.name || `Box ${s.id}`}
+      {showSensors ? (
+        <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
+          {/* Left: printers + cameras */}
+          <div className="space-y-6">
+            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+              {printers.map((p) => (
+                <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
+              ))}
+            </div>
+
+            {unassignedCameras.length > 0 && (
+              <div className="space-y-4">
+                <SectionTitle title="Unassigned cameras" />
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {unassignedCameras.map((c) => (
+                    <CameraCard key={c.id} camera={c} printers={printers} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right: filament box sensors */}
+          <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+            <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
+            <div className="space-y-3">
+              {enabledSensors.map((s) => (
+                <div
+                  key={s.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-3 w-3 rounded-full"
+                        style={{ backgroundColor: s.color || '#64748b' }}
+                      />
+                      <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                        {s.name || `Box ${s.id}`}
+                      </span>
+                    </div>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                      {s.filamentType || '—'}
                     </span>
                   </div>
-                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                    {s.filamentType || '—'}
-                  </span>
+                  {s.error ? (
+                    <p className="font-mono text-xs text-rose-500">{s.error}</p>
+                  ) : s.hasReading ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="font-mono text-[10px] uppercase text-slate-400">temp</p>
+                        <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                          {s.temp?.toFixed(1)}°<span className="text-xs text-slate-400">C</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-[10px] uppercase text-slate-400">humidity</p>
+                        <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                          {s.humidity?.toFixed(1)}<span className="text-xs text-slate-400">%</span>
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="font-mono text-xs text-slate-400">waiting for reading...</p>
+                  )}
                 </div>
-                {s.error ? (
-                  <p className="font-mono text-xs text-rose-500">{s.error}</p>
-                ) : s.hasReading ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <p className="font-mono text-[10px] uppercase text-slate-400">temp</p>
-                      <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
-                        {s.temp?.toFixed(1)}°<span className="text-xs text-slate-400">C</span>
-                      </p>
-                    </div>
-                    <div>
-                      <p className="font-mono text-[10px] uppercase text-slate-400">humidity</p>
-                      <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
-                        {s.humidity?.toFixed(1)}<span className="text-xs text-slate-400">%</span>
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="font-mono text-xs text-slate-400">waiting for reading...</p>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            {printers.map((p) => (
+              <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
+            ))}
+          </div>
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-        {printers.map((p) => (
-          <PrinterCard key={p.id} printer={p} />
-        ))}
-      </div>
-
-      {cameras.length > 0 && (
-        <div className="space-y-4">
-          <SectionTitle
-            title="Live cameras"
-            action={
-              <select
-                className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-                value={cameraFilter}
-                onChange={(e) => setCameraFilter(e.target.value)}
-              >
-                <option value="all">All printers</option>
-                {uniquePrinterIds.map((id) => (
-                  <option key={id} value={id}>
-                    {printers.find((p) => p.id === id)?.name ?? id}
-                  </option>
+          {unassignedCameras.length > 0 && (
+            <div className="space-y-4">
+              <SectionTitle title="Unassigned cameras" />
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {unassignedCameras.map((c) => (
+                  <CameraCard key={c.id} camera={c} printers={printers} />
                 ))}
-              </select>
-            }
-          />
-
-          {filteredCameras.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">No cameras for this selection.</p>
-          ) : (
-            <div className="space-y-6">
-              {Object.entries(
-                filteredCameras.reduce<Record<string, Camera[]>>((acc, c) => {
-                  const key = c.printerId || 'unassigned'
-                  ;(acc[key] ||= []).push(c)
-                  return acc
-                }, {})
-              )
-                .sort(([a], [b]) => (a === 'unassigned' ? 1 : b === 'unassigned' ? -1 : a.localeCompare(b)))
-                .map(([printerId, groupCameras]) => {
-                  const printer = printers.find((p) => p.id === printerId)
-                  return (
-                    <section key={printerId}>
-                      <h4 className="mb-2 font-mono text-sm text-slate-400">
-                        [{printer ? printer.name : 'unassigned'}]
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                        {groupCameras.map((c) => (
-                          <CameraCard key={c.id} camera={c} printers={printers} />
-                        ))}
-                      </div>
-                    </section>
-                  )
-                })}
+              </div>
             </div>
           )}
-        </div>
+        </>
       )}
+
+      {selected && <PrinterModal printer={selected} onClose={() => setSelected(null)} />}
     </div>
   )
 }
@@ -565,7 +558,7 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
         </div>
 
         <div className="flex-1 overflow-y-auto bg-slate-950 p-6">
-          {tab === 'controls' && <ControlsView printer={printer} />}
+          {tab === 'controls' && <ControlsView printer={printer} cameras={cameras} />}
           {tab === 'leveling' && <LevelingView printer={printer} />}
           {tab === 'cameras' && <CamerasView cameras={cameras} />}
           {tab === 'gcode' && <GCodeView printer={printer} />}
@@ -576,7 +569,7 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
   )
 }
 
-function ControlsView({ printer }: { printer: Printer }) {
+function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[] }) {
   const post = async (path: string, body?: object) => {
     try {
       const res = await fetch(`/api/printers/${printer.id}${path}`, {
@@ -596,9 +589,11 @@ function ControlsView({ printer }: { printer: Printer }) {
     post('/gcode', { command: gcode })
   }
 
+  const liveCamera = cameras.find((c) => c.enabled && c.url)
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-3">
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ temperatures ]</h3>
           <div className="space-y-4">
@@ -660,6 +655,21 @@ function ControlsView({ printer }: { printer: Printer }) {
             </button>
           </div>
         </Card>
+
+        {liveCamera && (
+          <Card className="md:row-span-2">
+            <h3 className="mb-4 font-mono font-semibold text-blue-400">[ live_camera ]</h3>
+            <div className="overflow-hidden rounded-xl border border-slate-700">
+              <img
+                src={liveCamera.url}
+                alt={liveCamera.name}
+                className="aspect-video w-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+            <p className="mt-2 font-mono text-xs text-slate-400">{liveCamera.name}</p>
+          </Card>
+        )}
       </div>
 
       <Card>
@@ -807,6 +817,7 @@ export function Printers() {
   const [selected, setSelected] = useState<Printer | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const { printers, loading, addPrinter } = usePrinters()
+  const { cameras } = useCameras()
 
   if (loading) {
     return (
@@ -833,7 +844,7 @@ export function Printers() {
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {printers.map((p) => (
-          <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} />
+          <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
         ))}
       </div>
 
