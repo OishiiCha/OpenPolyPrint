@@ -8,6 +8,9 @@ import { GCodePreview } from '../components/GCodePreview'
 import { TempChart } from '../components/TempChart'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import {
+  Camera as CameraIcon,
+  Circle,
+  CircleDot,
   Eye,
   EyeOff,
   FileCode2,
@@ -186,6 +189,54 @@ function PrinterGCodePreview({ fileName }: { fileName: string }) {
 function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: () => void; camera?: Camera }) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
+  const [recordMenuOpen, setRecordMenuOpen] = useState(false)
+  const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
+
+  // Poll recording status
+  useEffect(() => {
+    let active = true
+    const poll = () => {
+      if (isTest) return
+      fetch(`/api/printers/${printer.id}/record/status`)
+        .then((r) => r.json())
+        .then((data) => { if (active) setRecordStatus(data) })
+        .catch(() => {})
+    }
+    poll()
+    const interval = setInterval(poll, 3000)
+    return () => { active = false; clearInterval(interval) }
+  }, [printer.id])
+
+  const startRecord = async (mode: 'video' | 'timelapse') => {
+    setRecordMenuOpen(false)
+    if (isTest) { alert(`[test] start ${mode} recording for ${printer.name}`); return }
+    try {
+      const res = await fetch(`/api/printers/${printer.id}/record/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, interval: mode === 'timelapse' ? 1 : 0 }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to start recording' }))
+        alert(err.error)
+      }
+    } catch (err) {
+      alert(`Record failed: ${err}`)
+    }
+  }
+
+  const stopRecord = async () => {
+    setRecordMenuOpen(false)
+    if (isTest) { alert(`[test] stop recording for ${printer.name}`); return }
+    try {
+      await fetch(`/api/printers/${printer.id}/record/stop`, { method: 'POST' })
+    } catch (err) {
+      alert(`Stop failed: ${err}`)
+    }
+  }
+
+  const isRecording = recordStatus?.recording || recordStatus?.timelapse
+  const hasCamera = recordStatus?.hasCamera ?? !!camera
 
   return (
     <>
@@ -201,9 +252,19 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusColor[printer.status]}`}>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusColor[printer.status] || statusColor.Idle}`}>
               {printer.status}
             </span>
+            {isRecording && (
+              <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                <CircleDot className="h-3 w-3 animate-pulse" /> REC
+              </span>
+            )}
+            {recordStatus?.session && !isRecording && (
+              <span className="flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                <Circle className="h-3 w-3" /> Data
+              </span>
+            )}
             {onOpen && (
               <button
                 onClick={onOpen}
@@ -289,6 +350,45 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
             <Square className="h-4 w-4" /> Stop
           </button>
         </div>
+
+        {/* Record button with dropdown */}
+        {hasCamera && (
+          <div className="relative mt-3">
+            {isRecording ? (
+              <button
+                onClick={stopRecord}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                <Square className="h-4 w-4" /> Stop Recording
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => setRecordMenuOpen(!recordMenuOpen)}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  <Video className="h-4 w-4" /> Record
+                </button>
+                {recordMenuOpen && (
+                  <div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                    <button
+                      onClick={() => startRecord('video')}
+                      className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      <Video className="h-4 w-4" /> Video (full speed)
+                    </button>
+                    <button
+                      onClick={() => startRecord('timelapse')}
+                      className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      <CameraIcon className="h-4 w-4" /> Timelapse (1fps)
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </Card>
 
       {showConfirm && (

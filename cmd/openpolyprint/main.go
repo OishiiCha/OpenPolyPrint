@@ -29,6 +29,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/logstore"
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
+	"github.com/lucas/openpolyprint/internal/printsession"
 	"github.com/lucas/openpolyprint/internal/push"
 	"github.com/lucas/openpolyprint/internal/queue"
 	"github.com/lucas/openpolyprint/internal/smartplug"
@@ -188,7 +189,7 @@ func stopAutoRecord(cameraMgr *cameras.Manager, printerID string, auto map[strin
 }
 
 // trackHistory watches printer statuses, records finished prints, and triggers auto-recording.
-func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager) {
+func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager, sessMgr *printsession.Manager) {
 	last := map[string]printers.Status{}
 	started := map[string]time.Time{}
 	autoRecordings := map[string]bool{}
@@ -211,6 +212,13 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 					if _, ok := started[s.ID]; !ok {
 						started[s.ID] = time.Now()
 					}
+					// Auto-start print session data collection for AI
+					if !sessMgr.IsActive(s.ID) {
+						sessMgr.Start(s.ID, s.Name, s.CurrentFile)
+					}
+					sessMgr.RecordTemp(s.ID, s.Temps.Nozzle, s.Temps.TargetNozzle, s.Temps.Bed, s.Temps.TargetBed, float64(s.Progress))
+					sessMgr.RecordStatus(s.ID, s.StatusText, float64(s.Progress), s.CurrentFile)
+
 					if cfg.Enabled && (!hasPrev || prev.StatusText != "Printing") {
 						startAutoRecord(cameraMgr, s.ID, s.Name, s.CurrentFile, cfg.Mode, cfg.Interval, autoRecordings)
 					}
@@ -249,6 +257,9 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 					}
 					store.Add(s.Name, file, result, start, time.Now())
 					delete(started, s.ID)
+
+					// Stop print session data collection
+					sessMgr.Stop(s.ID, result)
 
 					// Send push notification
 					switch result {
@@ -379,6 +390,7 @@ func main() {
 
 	cameraMgr := cameras.NewManager(settingsDir)
 	piMgr := pi.NewManagerGroup(settingsDir)
+	sessMgr := printsession.NewManager(filepath.Join(settingsDir, "..", "recordings", "sessions"))
 
 	intgMgr := integrations.NewManager()
 	if data, err := os.ReadFile(settingsFile); err == nil {
@@ -1719,6 +1731,220 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
+
+	// ---- Print session endpoints (AI data collection) ----
+	mux.HandleFunc("/api/printers/{id}/session", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch r.Method {
+		case http.MethodGet:
+			// Return active session info + temp data
+			sess := sessMgr.Get(id)
+			if sess == nil {
+				http.Error(w, `{"error":"no active session"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(sess)
+		case http.MethodPost:
+			// Manually start a session
+			var req struct {
+				FileName string `json:"fileName"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			m := mgr.Load()
+			if m == nil {
+				http.Error(w, `{"error":"manager not available"}`, http.StatusInternalServerError)
+				return
+			}
+			d := m.Find(id)
+			if d == nil {
+				http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
+				return
+			}
+			name := id
+			if s, err := d.Status(); err == nil {
+				name = s.Name
+				if req.FileName == "" {
+					req.FileName = s.CurrentFile
+				}
+			}
+			sess := sessMgr.Start(id, name, req.FileName)
+			if sess == nil {
+				http.Error(w, `{"error":"failed to start session"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "session": sess})
+		case http.MethodDelete:
+			// Stop the session
+			sess := sessMgr.Stop(id, "Stopped")
+			if sess == nil {
+				http.Error(w, `{"error":"no active session"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "session": sess})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/printers/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessMgr.ActiveSessions()})
+	})
+
+	// ---- Manual recording per printer (video or timelapse) ----
+	mux.HandleFunc("/api/printers/{id}/record/start", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Mode     string  `json:"mode"`     // "video" or "timelapse"
+			Interval float64 `json:"interval"` // for timelapse
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Mode != "video" && req.Mode != "timelapse" {
+			req.Mode = "video"
+		}
+
+		// Find a camera assigned to this printer
+		var camID string
+		for _, cam := range cameraMgr.Store().GetCameras() {
+			if cam.PrinterID == id && (cam.Type == "usb" || cam.Type == "rpicam") && cam.Enabled {
+				camID = cam.ID
+				break
+			}
+		}
+		if camID == "" {
+			http.Error(w, `{"error":"no camera assigned to this printer"}`, http.StatusBadRequest)
+			return
+		}
+
+		streamer := cameraMgr.Streamers().GetStream(camID)
+		if streamer == nil {
+			// Start the stream if not running
+			for _, cam := range cameraMgr.Store().GetCameras() {
+				if cam.ID == camID {
+					cameraMgr.Streamers().StartStream(&cam)
+					break
+				}
+			}
+			time.Sleep(1500 * time.Millisecond)
+			streamer = cameraMgr.Streamers().GetStream(camID)
+		}
+		if streamer == nil {
+			http.Error(w, `{"error":"camera stream not available"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Get printer name and file for filename
+		printerName := id
+		fileName := ""
+		if m := mgr.Load(); m != nil {
+			if d := m.Find(id); d != nil {
+				if s, err := d.Status(); err == nil {
+					printerName = s.Name
+					fileName = s.CurrentFile
+				}
+			}
+		}
+		filename := fmt.Sprintf("%s_%s_%s.mkv", safeName(printerName), safeName(fileName), time.Now().Format("20060102-150405"))
+
+		var path string
+		var err error
+		if req.Mode == "timelapse" {
+			if req.Interval <= 0 {
+				req.Interval = 1
+			}
+			path, err = cameraMgr.Timelapses().Start(camID, streamer, filename, req.Interval)
+		} else {
+			path, err = cameraMgr.Records().Start(camID, streamer, filename)
+		}
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "path": path, "mode": req.Mode, "cameraId": camID})
+	})
+
+	mux.HandleFunc("/api/printers/{id}/record/stop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+
+		// Find camera for this printer and stop any active recording
+		var camID string
+		for _, cam := range cameraMgr.Store().GetCameras() {
+			if cam.PrinterID == id && (cam.Type == "usb" || cam.Type == "rpicam") {
+				camID = cam.ID
+				break
+			}
+		}
+		if camID == "" {
+			http.Error(w, `{"error":"no camera assigned to this printer"}`, http.StatusBadRequest)
+			return
+		}
+
+		var paths []string
+		if cameraMgr.Records().IsRecording(camID) {
+			if p, err := cameraMgr.Records().Stop(camID); err == nil {
+				paths = append(paths, p)
+			}
+		}
+		if cameraMgr.Timelapses().IsRecording(camID) {
+			if p, err := cameraMgr.Timelapses().Stop(camID); err == nil {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) == 0 {
+			http.Error(w, `{"error":"no active recording"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "paths": paths})
+	})
+
+	mux.HandleFunc("/api/printers/{id}/record/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		var camID string
+		for _, cam := range cameraMgr.Store().GetCameras() {
+			if cam.PrinterID == id && (cam.Type == "usb" || cam.Type == "rpicam") {
+				camID = cam.ID
+				break
+			}
+		}
+		status := map[string]any{
+			"recording": false,
+			"timelapse": false,
+			"hasCamera": camID != "",
+			"session":   sessMgr.IsActive(id),
+		}
+		if camID != "" {
+			status["recording"] = cameraMgr.Records().IsRecording(camID)
+			status["timelapse"] = cameraMgr.Timelapses().IsRecording(camID)
+			status["videoStatus"] = cameraMgr.Records().Status(camID)
+			status["timelapseStatus"] = cameraMgr.Timelapses().Status(camID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
+	})
+
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -1765,7 +1991,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr)
+	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr, sessMgr)
 
 	// Serve the built frontend if dist/ exists next to the binary.
 	dist := findDistDir()
