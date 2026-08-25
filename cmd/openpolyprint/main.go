@@ -21,6 +21,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/anker"
 	"github.com/lucas/openpolyprint/internal/anker/proto/config"
 	"github.com/lucas/openpolyprint/internal/cameras"
+	"github.com/lucas/openpolyprint/internal/envconfig"
 	"github.com/lucas/openpolyprint/internal/filament"
 	"github.com/lucas/openpolyprint/internal/gcode"
 	"github.com/lucas/openpolyprint/internal/history"
@@ -305,6 +306,17 @@ func findDistDir() string {
 	return ""
 }
 
+// envSecretConfig returns config values sourced from environment variables
+// (or .env file). These take precedence over settings.json values.
+func envSecretConfig() map[string]any {
+	return map[string]any{
+		"geminiApiKey":   envconfig.Get("GEMINI_API_KEY", ""),
+		"geminiEnabled":  envconfig.GetBool("GEMINI_ENABLED", false),
+		"envAnkerEmail":  envconfig.Get("ANKER_EMAIL", ""),
+		"envAnkerRegion": envconfig.Get("ANKER_REGION", ""),
+	}
+}
+
 func main() {
 	var (
 		dataDir   = flag.String("data-dir", "", "directory that holds ankerctl default.json (default: platform config dir/ankerctl)")
@@ -315,6 +327,14 @@ func main() {
 
 	logStore := logstore.New(2000)
 	log.SetOutput(io.MultiWriter(os.Stderr, logStore))
+
+	// Load .env file if present (from CWD, settings dir, or /data).
+	// Existing environment variables take precedence over .env values.
+	for _, dir := range []string{".", filepath.Dir(os.Args[0])} {
+		if err := envconfig.LoadDir(dir); err != nil {
+			log.Printf("[env] warning: could not load .env from %s: %v", dir, err)
+		}
+	}
 
 	// The Anker cloud endpoints currently reject Go's HTTP/2 handshake with a 502,
 	// and they require a non-Go User-Agent, so force HTTP/1.1 and python-requests
@@ -375,6 +395,36 @@ func main() {
 		}
 	}
 
+	// Apply env-based integration config (env takes precedence)
+	envIntegrations := map[string]map[string]string{
+		"telegram": {
+			"token":   envconfig.Get("TELEGRAM_BOT_TOKEN", ""),
+			"chat_id": envconfig.Get("TELEGRAM_CHAT_ID", ""),
+		},
+		"discord": {
+			"webhook_url": envconfig.Get("DISCORD_WEBHOOK_URL", ""),
+		},
+		"n8n": {
+			"webhook_url": envconfig.Get("N8N_WEBHOOK_URL", ""),
+		},
+		"obico": {
+			"obico_token": envconfig.Get("OBICO_TOKEN", ""),
+		},
+	}
+	for id, fields := range envIntegrations {
+		// Only set if at least one field is non-empty
+		hasValue := false
+		for _, v := range fields {
+			if v != "" {
+				hasValue = true
+				break
+			}
+		}
+		if hasValue {
+			intgMgr.SetConfig(id, fields)
+		}
+	}
+
 	var cfgMgr *config.ConfigManager
 	if *dataDir != "" {
 		cfgMgr = config.NewConfigManagerWithDir(*dataDir)
@@ -399,6 +449,29 @@ func main() {
 			m.Watchdog(context.Background())
 		}
 	}()
+
+	// Auto-login to Anker if credentials are provided via env vars
+	if email := envconfig.Get("ANKER_EMAIL", ""); email != "" {
+		if password := envconfig.Get("ANKER_PASSWORD", ""); password != "" {
+			region := envconfig.Get("ANKER_REGION", "NA")
+			go func() {
+				log.Printf("[anker] auto-login from env: %s (region %s)", email, region)
+				resp, newCfg, _ := anker.Login(email, password, region, "", "", "", nil, cfgMgr)
+				if resp.Success && newCfg != nil {
+					newMgr := buildManager(newCfg)
+					oldMgr := mgr.Swap(newMgr)
+					if oldMgr != nil {
+						_ = oldMgr.DisconnectAll()
+					}
+					_ = newMgr.ConnectAll(context.Background())
+					go newMgr.Watchdog(context.Background())
+					log.Printf("[anker] auto-login successful: %d printer(s)", len(newCfg.Printers))
+				} else if resp.Message != "" {
+					log.Printf("[anker] auto-login failed: %s", resp.Message)
+				}
+			}()
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -642,16 +715,24 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			data, err := os.ReadFile(settingsFile)
-			if err != nil {
-				if os.IsNotExist(err) {
-					http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
-					return
-				}
-				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-				return
+			// Start with settings.json (or empty defaults)
+			var config map[string]any
+			if data, err := os.ReadFile(settingsFile); err == nil {
+				_ = json.Unmarshal(data, &config)
 			}
-			_, _ = w.Write(data)
+			if config == nil {
+				config = map[string]any{}
+			}
+
+			// Merge env-based secrets (env takes precedence over settings.json)
+			envSecrets := envSecretConfig()
+			for k, v := range envSecrets {
+				if v != "" {
+					config[k] = v
+				}
+			}
+
+			_ = json.NewEncoder(w).Encode(config)
 		case http.MethodPost:
 			body, err := io.ReadAll(r.Body)
 			if err != nil {

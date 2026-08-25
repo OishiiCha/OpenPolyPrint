@@ -8,6 +8,10 @@ services:
         # host-mode networking is required for pppp communication with the printer
         network_mode: host
 
+        # Load secrets from .env file (see .env.example)
+        env_file:
+            - .env
+
         environment:
             - OPENPOLYPRINT_HOST=0.0.0.0
             - OPENPOLYPRINT_PORT=443

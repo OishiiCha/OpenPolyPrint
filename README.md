@@ -97,6 +97,25 @@ Environment variables used by the Docker compose files:
 - `OPENPOLYPRINT_PORT` — bind port, e.g. `443`
 - `OPENPOLYPRINT_DATA_DIR` — runtime data directory, e.g. `/data`
 
+### Secrets / API keys (.env)
+
+Copy `.env.example` to `.env` and fill in your values. The `.env` file is
+loaded automatically at startup (both for local dev and Docker). Docker
+Compose uses `env_file: .env` to inject the variables.
+
+Supported env vars (all optional — see `.env.example` for the full list):
+
+- `GEMINI_API_KEY` — Google Gemini API key for AI print analysis
+- `GEMINI_ENABLED` — enable AI analysis on startup (`true`/`false`)
+- `ANKER_EMAIL` / `ANKER_PASSWORD` / `ANKER_REGION` — auto-login to Anker cloud
+- `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — push notification keys (auto-generated if blank)
+- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — Telegram notifications
+- `DISCORD_WEBHOOK_URL` — Discord notifications
+- `N8N_WEBHOOK_URL` — n8n/Zapier webhook
+- `OBICO_TOKEN` — Obico integration
+
+Env vars take precedence over values saved in settings.json via the UI.
+
 ## Lint / CI
 
 ```bash

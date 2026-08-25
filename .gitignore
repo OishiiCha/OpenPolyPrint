@@ -32,6 +32,9 @@ login.json
 openpolyprint-config.json
 openpolyprint-offline-keys.json
 ankermake-m5-protocol/ankerctl/default.json
+.env
+.env.local
+.env.*.local
 
 # Recordings / streams
 *.h264

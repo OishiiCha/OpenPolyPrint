@@ -52,6 +52,15 @@ func (m *Manager) saveSubscriptions() {
 }
 
 func (m *Manager) loadOrGenerateKeys(settingsDir string) {
+	// Environment variables take precedence (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)
+	if pub := os.Getenv("VAPID_PUBLIC_KEY"); pub != "" {
+		if priv := os.Getenv("VAPID_PRIVATE_KEY"); priv != "" {
+			m.vapidPublic = pub
+			m.vapidPrivate = priv
+			return
+		}
+	}
+
 	pubPath := filepath.Join(settingsDir, "vapid_public.key")
 	privPath := filepath.Join(settingsDir, "vapid_private.key")
 

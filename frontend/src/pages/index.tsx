@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useParams } from 'react-router-dom'
-import { loadConfig, saveConfig, type AppConfig, type ProviderConfig } from '../config'
+import { loadConfig, loadConfigWithEnv, saveConfig, type AppConfig, type ProviderConfig } from '../config'
 import { Switch } from '../components/Switch'
 import { BedPreview } from '../components/BedPreview'
 import { GCodePreview } from '../components/GCodePreview'
@@ -3612,6 +3612,13 @@ export function Settings() {
     loadAnker()
   }, [ankerLoginOpen])
 
+  // Load env-based config from backend (secrets from .env file)
+  useEffect(() => {
+    loadConfigWithEnv().then((envConfig) => {
+      setConfig(envConfig)
+    })
+  }, [])
+
   const inputClass =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
 
@@ -3712,7 +3719,7 @@ export function Settings() {
           </div>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             Bring your own Gemini API key to enable AI-powered print analysis.
-            The key is stored locally and sent directly to Google's Gemini API.
+            The key can be set via the <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">GEMINI_API_KEY</code> env var (in .env) or entered here.
             Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" className="text-blue-500 underline">aistudio.google.com/apikey</a>.
           </p>
           <input

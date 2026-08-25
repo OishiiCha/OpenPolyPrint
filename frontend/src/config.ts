@@ -108,6 +108,34 @@ export function loadConfig(): AppConfig {
   return defaultConfig()
 }
 
+// loadConfigWithEnv fetches the backend config (which includes env-based
+// secrets) and merges it with the localStorage config. Env-based values
+// from the backend take precedence for secrets (geminiApiKey, etc.).
+// Falls back to localStorage-only if the backend is unreachable.
+export async function loadConfigWithEnv(): Promise<AppConfig> {
+  const local = loadConfig()
+  try {
+    const res = await fetch('/api/config')
+    if (!res.ok) return local
+    const remote = await res.json() as Partial<AppConfig> & {
+      geminiApiKey?: string
+      geminiEnabled?: boolean
+      envAnkerEmail?: string
+      envAnkerRegion?: string
+    }
+    // Env-based values from backend override localStorage
+    return {
+      ...local,
+      ...remote,
+      // Only override if the env value is non-empty (otherwise keep local)
+      geminiApiKey: remote.geminiApiKey || local.geminiApiKey,
+      geminiEnabled: remote.geminiEnabled ?? local.geminiEnabled,
+    } as AppConfig
+  } catch {
+    return local
+  }
+}
+
 export function saveConfig(config: AppConfig): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
   window.dispatchEvent(new CustomEvent('openpolyprint-config-updated'))
