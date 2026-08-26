@@ -310,9 +310,8 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
 
         {printer.status === 'Printing' && (
           <div className="mt-5">
-            <div className="mb-2 flex justify-between text-xs text-slate-500 dark:text-slate-400">
-              <span>{printer.currentFile}</span>
-              <span>{printer.remainingTime} left</span>
+            <div className="mb-2 overflow-hidden text-xs text-slate-500 dark:text-slate-400">
+              <p className="truncate" title={printer.currentFile}>{printer.currentFile}</p>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
               <div
@@ -320,9 +319,14 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
                 style={{ width: `${printer.progress}%` }}
               />
             </div>
-            <p className="mt-2 text-right text-sm font-semibold text-blue-600 dark:text-blue-400">
-              {printer.progress}%
-            </p>
+            <div className="mt-2 flex items-center justify-between">
+              <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                {printer.progress}%
+              </p>
+              <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                {printer.remainingTime} left
+              </span>
+            </div>
           </div>
         )}
 

@@ -8,7 +8,6 @@ import {
   Lightbulb,
   Sun,
   Moon,
-  Download,
   X,
   Bell as BellIcon,
   Play,
@@ -17,10 +16,8 @@ import {
   Thermometer,
   Gauge,
   Clock,
-  Video,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
-import { usePWAInstall } from '../hooks/usePWAInstall'
 import { useCameras } from '../hooks/useCameras'
 import { usePrinters } from '../hooks/usePrinters'
 import { usePiReadings } from '../hooks/usePi'
@@ -32,7 +29,6 @@ type Tab = 'dashboard' | 'cameras' | 'printer' | 'settings'
 export function PhoneLayout({ children: _children }: { children: React.ReactNode }) {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [isDark, setIsDark] = useState(() => loadConfig().dark)
-  const [showInstallGuide, setShowInstallGuide] = useState(false)
 
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark')
@@ -62,7 +58,7 @@ export function PhoneLayout({ children: _children }: { children: React.ReactNode
 
       {/* Content area */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'dashboard' && <PhoneDashboard onSwitchTab={setTab} />}
+        {tab === 'dashboard' && <PhoneDashboard />}
         {tab === 'cameras' && <PhoneCameras />}
         {tab === 'printer' && <PhonePrinter />}
         {tab === 'settings' && <PhoneSettings isDark={isDark} />}
@@ -89,36 +85,13 @@ export function PhoneLayout({ children: _children }: { children: React.ReactNode
           )
         })}
       </nav>
-
-      {/* Install guide modal */}
-      {showInstallGuide && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={() => setShowInstallGuide(false)}>
-          <div className="dark w-full max-w-sm rounded-2xl border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-mono font-semibold text-blue-400">Install app</h2>
-              <button onClick={() => setShowInstallGuide(false)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <h3 className="mb-1 font-mono text-sm font-semibold text-slate-200">Chrome / Edge</h3>
-                <p className="font-mono text-xs text-slate-400">Menu (three dots) → Install page as app</p>
-              </div>
-              <div>
-                <h3 className="mb-1 font-mono text-sm font-semibold text-slate-200">Safari (iOS)</h3>
-                <p className="font-mono text-xs text-slate-400">Share button → Add to Home Screen</p>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   )
 }
 
 // ─── Dashboard Tab ────────────────────────────────────────────────────────────
 
-function PhoneDashboard({ onSwitchTab }: { onSwitchTab: (t: Tab) => void }) {
+function PhoneDashboard() {
   const { cameras } = useCameras()
   const { printers } = usePrinters()
   const { readings, toggleLight } = usePiReadings()
@@ -211,33 +184,6 @@ function PhoneDashboard({ onSwitchTab }: { onSwitchTab: (t: Tab) => void }) {
           ))}
         </div>
       )}
-
-      {/* Quick actions row */}
-      <div className="flex items-center justify-around border-t border-slate-200 bg-white py-2 dark:border-slate-800 dark:bg-slate-950">
-        <button
-          onClick={() => onSwitchTab('printer')}
-          className="flex flex-col items-center gap-1 text-slate-600 dark:text-slate-400"
-        >
-          <PrinterIcon className="h-5 w-5" />
-          <span className="text-[10px] font-medium">Printer</span>
-        </button>
-        <button
-          onClick={() => onSwitchTab('cameras')}
-          className="flex flex-col items-center gap-1 text-slate-600 dark:text-slate-400"
-        >
-          <Video className="h-5 w-5" />
-          <span className="text-[10px] font-medium">Cameras</span>
-        </button>
-        {readings?.lightRelayEnabled && (
-          <button
-            onClick={() => toggleLight(!readings.lightRelayOn)}
-            className={`flex flex-col items-center gap-1 ${readings.lightRelayOn ? 'text-amber-500' : 'text-slate-600 dark:text-slate-400'}`}
-          >
-            <Lightbulb className="h-5 w-5" />
-            <span className="text-[10px] font-medium">Light</span>
-          </button>
-        )}
-      </div>
 
       {/* Expand modal */}
       {showExpand && mainCamera && createPortal(
@@ -487,9 +433,7 @@ function PrinterCard({ printer }: { printer: Printer }) {
 // ─── Settings Tab ─────────────────────────────────────────────────────────────
 
 function PhoneSettings({ isDark }: { isDark: boolean }) {
-  const { canInstall, canInstallManual, promptInstall, installed } = usePWAInstall()
   const push = usePushNotifications()
-  const [showInstallGuide, setShowInstallGuide] = useState(false)
 
   const toggle = (key: 'dark', value: boolean) => {
     const cfg = loadConfig()
@@ -515,19 +459,6 @@ function PhoneSettings({ isDark }: { isDark: boolean }) {
           </div>
         </button>
 
-        {/* Install app */}
-        {!installed && (canInstall || canInstallManual) && (
-          <button
-            onClick={() => canInstall ? promptInstall() : setShowInstallGuide(true)}
-            className="flex w-full items-center justify-between rounded-2xl bg-blue-600 p-4 text-white"
-          >
-            <div className="flex items-center gap-3">
-              <Download className="h-5 w-5" />
-              <span className="font-mono text-sm">Install app</span>
-            </div>
-          </button>
-        )}
-
         {/* Push notifications */}
         {push.supported && (
           <button
@@ -551,29 +482,6 @@ function PhoneSettings({ isDark }: { isDark: boolean }) {
           Open OpenPolyPrint on a desktop browser for all settings, integrations, G-code management, history, and terminal.
         </p>
       </div>
-
-      {/* Install guide */}
-      {showInstallGuide && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={() => setShowInstallGuide(false)}>
-          <div className="dark w-full max-w-sm rounded-2xl border-2 border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-mono font-semibold text-blue-400">Install app</h2>
-              <button onClick={() => setShowInstallGuide(false)} className="text-slate-400 hover:text-white"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <h3 className="mb-1 font-mono text-sm font-semibold text-slate-200">Chrome / Edge</h3>
-                <p className="font-mono text-xs text-slate-400">Menu (three dots) → Install page as app</p>
-              </div>
-              <div>
-                <h3 className="mb-1 font-mono text-sm font-semibold text-slate-200">Safari (iOS)</h3>
-                <p className="font-mono text-xs text-slate-400">Share button → Add to Home Screen</p>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   )
 }
