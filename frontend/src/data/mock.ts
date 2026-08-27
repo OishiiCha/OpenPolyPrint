@@ -19,9 +19,6 @@ export const mockPrinter: Printer = {
   remainingTime: '1h 23m',
   layerNum: 87,
   layerCount: 200,
-  timeElapsed: 4980,  // ~1h 23m
-  totalTime: 11880,   // ~3h 18m
-  updated_at: new Date().toISOString(),
 }
 
 export const mockCamera: Camera = {

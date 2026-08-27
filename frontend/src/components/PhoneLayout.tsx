@@ -17,7 +17,6 @@ import {
   Gauge,
   Clock,
   Layers,
-  Timer,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { useCameras } from '../hooks/useCameras'
@@ -306,13 +305,6 @@ function PhonePrinter() {
   )
 }
 
-function formatDuration(s: number) {
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = Math.floor(s % 60)
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
-}
-
 function PrinterCard({ printer }: { printer: Printer }) {
   const [busy, setBusy] = useState(false)
 
@@ -368,22 +360,6 @@ function PrinterCard({ printer }: { printer: Printer }) {
               <div className="flex items-center gap-1.5 font-mono text-xs text-slate-600 dark:text-slate-300">
                 <Layers className="h-3 w-3 text-slate-400" />
                 <span>{printer.layerNum || 0} / {printer.layerCount}</span>
-              </div>
-            )}
-            {(printer.timeElapsed ?? 0) > 0 && (
-              <div className="flex items-center gap-1.5 font-mono text-xs text-slate-600 dark:text-slate-300">
-                <Timer className="h-3 w-3 text-slate-400" />
-                <span>{formatDuration(printer.timeElapsed!)}</span>
-              </div>
-            )}
-            {(printer.timeElapsed ?? 0) > 0 && printer.updated_at && (
-              <div className="font-mono text-[10px] text-slate-400">
-                Started {new Date(new Date(printer.updated_at).getTime() - printer.timeElapsed! * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-              </div>
-            )}
-            {(printer.totalTime ?? 0) > 0 && printer.updated_at && (printer.timeElapsed ?? 0) > 0 && (
-              <div className="font-mono text-[10px] text-slate-400">
-                End {new Date(new Date(printer.updated_at).getTime() + (printer.totalTime! - printer.timeElapsed!) * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
               </div>
             )}
           </div>

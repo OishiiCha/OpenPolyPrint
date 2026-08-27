@@ -17,9 +17,6 @@ export interface Printer {
   remainingTime?: string
   layerNum?: number
   layerCount?: number
-  timeElapsed?: number  // seconds since print started
-  totalTime?: number    // estimated total print time in seconds
-  updated_at?: string
 }
 
 export interface GCodeFile {

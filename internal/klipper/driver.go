@@ -20,8 +20,8 @@ import (
 
 // Driver implements printers.Driver over the Moonraker HTTP API.
 type Driver struct {
-	cfg    printers.PrinterConfig
-	client *http.Client
+	cfg     printers.PrinterConfig
+	client  *http.Client
 	baseURL string
 
 	mu     sync.RWMutex
@@ -64,8 +64,8 @@ func (d *Driver) Connect(ctx context.Context) error {
 	// Moonraker server.info endpoint
 	var info struct {
 		Result struct {
-			Version      string `json:"version"`
-			KlippyState  string `json:"klippy_state"`
+			Version     string `json:"version"`
+			KlippyState string `json:"klippy_state"`
 		} `json:"result"`
 	}
 	if err := d.getJSON(ctx, "/server/info", &info); err != nil {
@@ -85,9 +85,9 @@ func (d *Driver) Status() (printers.Status, error) {
 	// Query printer.info for state + filename
 	var printerInfo struct {
 		Result struct {
-			State       string `json:"state"`
+			State        string `json:"state"`
 			StateMessage string `json:"state_message"`
-			Filename    string `json:"print_stats"`
+			Filename     string `json:"print_stats"`
 		} `json:"result"`
 	}
 	// Moonraker printer.info returns state, and print_stats is separate
@@ -100,14 +100,14 @@ func (d *Driver) Status() (printers.Status, error) {
 	if err := d.getJSON(ctx, "/printer/info", &infoResp); err != nil {
 		d.mu.Lock()
 		d.cached = printers.Status{
-			ID:        d.cfg.ID,
-			Name:      d.cfg.Name,
-			Type:      "klipper",
-			Online:    false,
-			State:     "offline",
+			ID:         d.cfg.ID,
+			Name:       d.cfg.Name,
+			Type:       "klipper",
+			Online:     false,
+			State:      "offline",
 			StatusText: "Offline",
-			UpdatedAt: time.Now(),
-			Error:     err.Error(),
+			UpdatedAt:  time.Now(),
+			Error:      err.Error(),
 		}
 		s := d.cached
 		d.mu.Unlock()
@@ -127,23 +127,23 @@ func (d *Driver) Status() (printers.Status, error) {
 					Target      float64 `json:"target"`
 				} `json:"heater_bed"`
 				PrintStats struct {
-					State        string  `json:"state"`
-					Filename     string  `json:"filename"`
+					State         string  `json:"state"`
+					Filename      string  `json:"filename"`
 					TotalDuration float64 `json:"total_duration"`
 					PrintDuration float64 `json:"print_duration"`
 					FilamentUsed  float64 `json:"filament_used"`
 					Progress      float64 `json:"progress"`
 				} `json:"print_stats"`
 				VirtualSDCard struct {
-					Progress       float64 `json:"progress"`
-					IsActive       bool    `json:"is_active"`
-					FilePosition   float64 `json:"file_position"`
+					Progress     float64 `json:"progress"`
+					IsActive     bool    `json:"is_active"`
+					FilePosition float64 `json:"file_position"`
 				} `json:"virtual_sdcard"`
 				LayerInfo struct {
-					Layer        int     `json:"layer"`
-					TotalLayers  int     `json:"total_layers"`
-					Height       float64 `json:"height"`
-					TotalHeight  float64 `json:"total_height"`
+					Layer       int     `json:"layer"`
+					TotalLayers int     `json:"total_layers"`
+					Height      float64 `json:"height"`
+					TotalHeight float64 `json:"total_height"`
 				} `json:"print_stats"` // may not always be present
 			} `json:"status"`
 		} `json:"result"`
@@ -161,11 +161,11 @@ func (d *Driver) Status() (printers.Status, error) {
 	ps := st.PrintStats
 
 	s := printers.Status{
-		ID:        d.cfg.ID,
-		Name:      d.cfg.Name,
-		Type:      "klipper",
-		Online:    true,
-		State:     infoResp.Result.State,
+		ID:         d.cfg.ID,
+		Name:       d.cfg.Name,
+		Type:       "klipper",
+		Online:     true,
+		State:      infoResp.Result.State,
 		StatusText: humanizeKlipperState(infoResp.Result.State, ps.State),
 		Temps: printers.Temps{
 			Nozzle:       st.Extruder.Temperature,
@@ -176,14 +176,6 @@ func (d *Driver) Status() (printers.Status, error) {
 		Progress:    int(ps.Progress * 100),
 		CurrentFile: ps.Filename,
 		UpdatedAt:   time.Now(),
-	}
-
-	// Time tracking
-	if ps.PrintDuration > 0 {
-		s.TimeElapsed = int64(ps.PrintDuration)
-	}
-	if ps.TotalDuration > 0 {
-		s.TotalTime = int64(ps.TotalDuration)
 	}
 
 	// Remaining time estimate

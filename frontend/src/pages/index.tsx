@@ -342,35 +342,6 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
                   </p>
                 </div>
               )}
-              {/* Run time (elapsed) */}
-              {(printer.timeElapsed ?? 0) > 0 && (
-                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
-                  <p className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
-                    <Timer className="h-3 w-3" /> Run time
-                  </p>
-                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
-                    {formatDuration(printer.timeElapsed!)}
-                  </p>
-                </div>
-              )}
-              {/* Start time (derived from updatedAt - elapsed) */}
-              {(printer.timeElapsed ?? 0) > 0 && printer.updated_at && (
-                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
-                  <p className="font-mono text-[10px] text-slate-400">Started</p>
-                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
-                    {new Date(new Date(printer.updated_at).getTime() - printer.timeElapsed! * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-              )}
-              {/* Estimated end time (updatedAt + remaining seconds) */}
-              {(printer.totalTime ?? 0) > 0 && printer.updated_at && (printer.timeElapsed ?? 0) > 0 && (
-                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
-                  <p className="font-mono text-[10px] text-slate-400">Est. end</p>
-                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
-                    {new Date(new Date(printer.updated_at).getTime() + (printer.totalTime! - printer.timeElapsed!) * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         )}
