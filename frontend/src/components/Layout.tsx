@@ -116,6 +116,7 @@ export function Layout() {
   const [isDark, setIsDark] = useState(() => loadConfig().dark)
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
   const [geminiEnabled, setGeminiEnabled] = useState(() => loadConfig().geminiEnabled)
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(() => loadConfig().analyticsEnabled)
 
   useEffect(() => {
     if (isDark) {
@@ -131,6 +132,7 @@ export function Layout() {
       setIsDark(cfg.dark)
       setShowMini(cfg.showMiniTerminal)
       setGeminiEnabled(cfg.geminiEnabled)
+      setAnalyticsEnabled(cfg.analyticsEnabled)
     }
     window.addEventListener('openpolyprint-config-updated', handler)
     return () => window.removeEventListener('openpolyprint-config-updated', handler)
@@ -147,7 +149,10 @@ export function Layout() {
         </Link>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-          {navItems.filter((item) => item.to !== '/analysis' || geminiEnabled).map((item) => (
+          {navItems.filter((item) =>
+            (item.to !== '/analysis' || geminiEnabled) &&
+            (item.to !== '/analytics' || analyticsEnabled)
+          ).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

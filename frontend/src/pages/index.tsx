@@ -3883,6 +3883,15 @@ export function Settings() {
             className={inputClass}
           />
         </Card>
+        <Card>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="font-semibold text-slate-900 dark:text-white">Analytics dashboard</h3>
+            <Switch checked={config.analyticsEnabled} onChange={(v) => update({ analyticsEnabled: v })} />
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Show the Analytics tab with print success rates, time stats, filament usage, and cost breakdowns.
+          </p>
+        </Card>
         {push.supported && (
           <Card>
             <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Push notifications</h3>

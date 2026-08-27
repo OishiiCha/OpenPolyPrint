@@ -58,8 +58,16 @@ export function Analytics() {
 
   useEffect(() => {
     fetch('/api/analytics')
-      .then((r) => r.json())
-      .then((data: Stats) => setStats(data))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data: Stats) => {
+        // Validate the response has the expected shape
+        if (data && typeof data.totalPrints === 'number') {
+          setStats(data)
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -91,14 +99,14 @@ export function Analytics() {
     )
   }
 
-  const topFiles = Object.entries(stats.printsPerFile)
+  const topFiles = Object.entries(stats.printsPerFile || {})
     .sort(([, a], [, b]) => b - a)
     .slice(0, 10)
-  const topPrinters = Object.entries(stats.printsPerPrinter)
+  const topPrinters = Object.entries(stats.printsPerPrinter || {})
     .sort(([, a], [, b]) => b - a)
 
   // Simple bar chart for prints per day (last 14 days with data)
-  const dayEntries = Object.entries(stats.printsPerDay).sort(([a], [b]) => a.localeCompare(b))
+  const dayEntries = Object.entries(stats.printsPerDay || {}).sort(([a], [b]) => a.localeCompare(b))
   const recentDays = dayEntries.slice(-14)
   const maxDayCount = Math.max(1, ...recentDays.map(([, c]) => c))
 
@@ -234,13 +242,13 @@ export function Analytics() {
         )}
 
         {/* Filament by type */}
-        {Object.keys(stats.filamentByType).length > 0 && (
+        {Object.keys(stats.filamentByType || {}).length > 0 && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
               <Layers className="h-4 w-4 text-orange-500" /> Filament by type
             </h3>
             <div className="space-y-2">
-              {Object.entries(stats.filamentByType)
+              {Object.entries(stats.filamentByType || {})
                 .sort(([, a], [, b]) => b - a)
                 .map(([type, grams]) => (
                   <div key={type} className="flex items-center justify-between">
