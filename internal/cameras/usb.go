@@ -423,11 +423,12 @@ func (u *UsbCameraStreamer) setLastErr(err error) {
 
 // CameraStreamStatus is a point-in-time health snapshot of a streamer.
 type CameraStreamStatus struct {
-	Running   bool   `json:"running"`
-	Live      bool   `json:"live"`
-	FPS       int    `json:"fps"`
-	Frames    int64  `json:"frames"`
-	LastError string `json:"lastError"`
+	Running      bool          `json:"running"`
+	Live         bool          `json:"live"`
+	FPS          int           `json:"fps"`
+	Frames       int64         `json:"frames"`
+	LastError    string        `json:"lastError"`
+	LastFrameAge time.Duration `json:"lastFrameAge"`
 }
 
 // Status returns the current health of the streamer.
@@ -439,9 +440,12 @@ func (u *UsbCameraStreamer) Status() CameraStreamStatus {
 		Frames:    u.frames,
 		LastError: u.lastErr,
 	}
-	if !u.lastFrameAt.IsZero() && time.Since(u.lastFrameAt) < 5*time.Second {
-		st.Live = true
-		st.FPS = int(u.fpsEst + 0.5)
+	if !u.lastFrameAt.IsZero() {
+		st.LastFrameAge = time.Since(u.lastFrameAt)
+		if st.LastFrameAge < 5*time.Second {
+			st.Live = true
+			st.FPS = int(u.fpsEst + 0.5)
+		}
 	}
 	return st
 }
@@ -797,4 +801,38 @@ func (m *UsbStreamerManager) StartAllFromSettings(store *Store) {
 			m.StartStream(&cam)
 		}
 	}
+}
+
+// StartWatchdog launches a background goroutine that periodically checks
+// all registered streamers and restarts any that have died or stopped
+// producing frames. This ensures streams stay alive even if ffmpeg/rpicam-vid
+// crashes or the camera temporarily disconnects.
+func (m *UsbStreamerManager) StartWatchdog(store *Store) {
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			settings := store.GetSettings()
+			for _, cam := range settings.Cameras {
+				if cam.Type != "usb" && cam.Type != "rpicam" {
+					continue
+				}
+				if !cam.Enabled {
+					continue
+				}
+				streamer := m.GetStream(cam.ID)
+				if streamer == nil || !streamer.IsRunning() {
+					Debugf("usbmgr", "watchdog: restarting dead stream for camera %q", cam.Name)
+					m.StartStream(&cam)
+					continue
+				}
+				// Check for stale frames (no frame in last 30s = likely hung)
+				if s := streamer.Status(); s.LastFrameAge > 30*time.Second {
+					Debugf("usbmgr", "watchdog: stream for %q is stale (no frame in %s), restarting", cam.Name, s.LastFrameAge)
+					m.StopStream(cam.ID)
+					m.StartStream(&cam)
+				}
+			}
+		}
+	}()
 }

@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,15 +16,15 @@ import (
 // It logs temperature samples, printer status changes, and metadata
 // to a JSON file that can be used with the AI analysis feature.
 type Session struct {
-	PrinterID   string    `json:"printerId"`
-	PrinterName string    `json:"printerName"`
-	FileName    string    `json:"fileName"`
-	StartTime   time.Time `json:"startTime"`
+	PrinterID   string     `json:"printerId"`
+	PrinterName string     `json:"printerName"`
+	FileName    string     `json:"fileName"`
+	StartTime   time.Time  `json:"startTime"`
 	EndTime     *time.Time `json:"endTime,omitempty"`
-	Status      string    `json:"status"`
-	Progress    float64   `json:"progress"`
+	Status      string     `json:"status"`
+	Progress    float64    `json:"progress"`
 
-	TempSamples []TempSample `json:"tempSamples"`
+	TempSamples []TempSample  `json:"tempSamples"`
 	StatusLog   []StatusEntry `json:"statusLog"`
 
 	mu       sync.Mutex
@@ -43,10 +45,10 @@ type TempSample struct {
 
 // StatusEntry records a status change during the print.
 type StatusEntry struct {
-	Time     int64  `json:"time"`
-	Status   string `json:"status"`
+	Time     int64   `json:"time"`
+	Status   string  `json:"status"`
 	Progress float64 `json:"progress"`
-	File     string `json:"file"`
+	File     string  `json:"file"`
 }
 
 // Manager tracks active print sessions per printer.
@@ -265,4 +267,97 @@ func safeFilename(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// SavedSessionInfo is metadata about a saved session file on disk.
+type SavedSessionInfo struct {
+	ID           string     `json:"id"` // filename without .json
+	PrinterName  string     `json:"printerName"`
+	FileName     string     `json:"fileName"`
+	StartTime    time.Time  `json:"startTime"`
+	EndTime      *time.Time `json:"endTime,omitempty"`
+	Status       string     `json:"status"`
+	Progress     float64    `json:"progress"`
+	SampleCount  int        `json:"sampleCount"`
+	TimelapseDir string     `json:"timelapseDir,omitempty"` // linked timelapse frames dir
+	HasGcode     bool       `json:"hasGcode"`               // whether a matching gcode file exists
+	GcodeID      string     `json:"gcodeId,omitempty"`      // matching gcode file ID
+}
+
+// ListSavedSessions lists all saved session files with metadata.
+// It also attempts to link each session to a timelapse frame directory
+// by matching the timestamp in the filename.
+func (m *Manager) ListSavedSessions() ([]SavedSessionInfo, error) {
+	entries, err := os.ReadDir(m.dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build a set of available timelapse frame dirs for linking
+	timelapseDirs := map[string]bool{}
+	if tlEntries, err := os.ReadDir("recordings/timelapse"); err == nil {
+		for _, e := range tlEntries {
+			if e.IsDir() && strings.HasSuffix(e.Name(), "_frames") {
+				timelapseDirs[e.Name()] = true
+			}
+		}
+	}
+
+	var sessions []SavedSessionInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		data, err := os.ReadFile(filepath.Join(m.dataDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var sess Session
+		if err := json.Unmarshal(data, &sess); err != nil {
+			continue
+		}
+		info := SavedSessionInfo{
+			ID:          id,
+			PrinterName: sess.PrinterName,
+			FileName:    sess.FileName,
+			StartTime:   sess.StartTime,
+			EndTime:     sess.EndTime,
+			Status:      sess.Status,
+			Progress:    sess.Progress,
+			SampleCount: len(sess.TempSamples),
+		}
+
+		// Try to find linked timelapse dir by timestamp
+		timestamp := sess.StartTime.Format("20060102-150405")
+		for dir := range timelapseDirs {
+			if strings.Contains(dir, timestamp) {
+				info.TimelapseDir = dir
+				break
+			}
+		}
+
+		sessions = append(sessions, info)
+	}
+
+	// Sort by start time descending (newest first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].StartTime.After(sessions[j].StartTime)
+	})
+
+	return sessions, nil
+}
+
+// GetSavedSession loads a session by its ID (filename without .json).
+func (m *Manager) GetSavedSession(id string) (*Session, error) {
+	filePath := filepath.Join(m.dataDir, id+".json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("load session: %w", err)
+	}
+	var sess Session
+	if err := json.Unmarshal(data, &sess); err != nil {
+		return nil, fmt.Errorf("parse session: %w", err)
+	}
+	return &sess, nil
 }

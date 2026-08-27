@@ -21,7 +21,11 @@ import { PrintQueue } from './pages/PrintQueue'
 import { Filament } from './pages/Filament'
 import { SmartPlugs } from './pages/SmartPlugs'
 import { PrintAnalysis } from './pages/PrintAnalysis'
+import { Analytics } from './pages/Analytics'
+import { Profiles } from './pages/Profiles'
+import { Login } from './pages/Login'
 import { BackgroundStreams } from './components/BackgroundStreams'
+import { useAuth } from './hooks/useAuth'
 
 function useIsPhone() {
   const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 767px)').matches)
@@ -36,6 +40,20 @@ function useIsPhone() {
 
 function App() {
   const isPhone = useIsPhone()
+  const { enabled, authenticated, loading, login } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>
+    )
+  }
+
+  // Show login screen if auth is enabled and user is not authenticated
+  if (enabled && !authenticated) {
+    return <Login onLogin={login} />
+  }
 
   if (isPhone) {
     return (
@@ -63,8 +81,10 @@ function App() {
           <Route path="gcode/:id" element={<GCodeDetail />} />
           <Route path="queue" element={<PrintQueue />} />
           <Route path="filament" element={<Filament />} />
+          <Route path="profiles" element={<Profiles />} />
           <Route path="plugs" element={<SmartPlugs />} />
           <Route path="analysis" element={<PrintAnalysis />} />
+          <Route path="analytics" element={<Analytics />} />
           <Route path="cameras" element={<Cameras />} />
           <Route path="recordings" element={<Recordings />} />
           <Route path="pi" element={<Pi />} />

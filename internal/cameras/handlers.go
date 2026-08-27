@@ -254,6 +254,49 @@ func Mount(mux *http.ServeMux, m *Manager) {
 		m.Streamers().StopStream(previewID)
 	})
 
+	// Dedicated stream endpoint for configured cameras.
+	// Unlike the preview endpoints, this does NOT sleep waiting for the first
+	// frame and does NOT stop the stream when the client disconnects. The
+	// streamer is expected to already be running (started at app startup or
+	// when the camera was added). If it's not running, we start it and wait
+	// briefly for the first frame.
+	mux.HandleFunc("/api/cameras/{id}/stream", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, `{"error":"id required"}`, http.StatusBadRequest)
+			return
+		}
+
+		streamer := m.Streamers().GetStream(id)
+		if streamer == nil || !streamer.IsRunning() {
+			// Stream not running — try to start it from saved config
+			cfg := findByID(m.Store().GetCameras(), id)
+			if cfg.ID == "" {
+				http.Error(w, `{"error":"camera not found"}`, http.StatusNotFound)
+				return
+			}
+			m.Streamers().StartStream(&cfg)
+			// Wait for first frame (shorter than preview — stream should be warm)
+			for i := 0; i < 30; i++ {
+				streamer = m.Streamers().GetStream(id)
+				if streamer != nil && streamer.IsRunning() {
+					if s := streamer.Status(); s.Frames > 0 {
+						break
+					}
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		if streamer == nil {
+			http.Error(w, `{"error":"failed to start stream"}`, http.StatusInternalServerError)
+			return
+		}
+		serveMjpeg(w, r, streamer)
+		// Do NOT stop the stream on disconnect — it stays running for other
+		// clients and instant reconnection.
+	})
+
 	mux.HandleFunc("/api/cameras/{id}/record/start", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)

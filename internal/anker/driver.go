@@ -196,6 +196,10 @@ func (d *Driver) Status() (printers.Status, error) {
 		CurrentFile:   ps["fileName"].(string),
 		RemainingTime: formatDurationSeconds(ps["timeRemaining"].(int64)),
 		UpdatedAt:     time.Now(),
+		LayerNum:      ps["layerNum"].(int),
+		LayerCount:    ps["layerCount"].(int),
+		TimeElapsed:   ps["timeElapsed"].(int64),
+		TotalTime:     ps["totalTime"].(int64),
 	}
 
 	if s.Online {

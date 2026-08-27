@@ -24,9 +24,12 @@ function toCamera(c: any): Camera {
   const type: Camera['type'] = c.type === 'rpicam' ? 'mipi' : c.type
   let url = c.url
   if (c.type === 'usb') {
-    url = `/api/cameras/usb/preview?deviceId=${encodeURIComponent(c.deviceId || '')}&deviceLabel=${encodeURIComponent(c.deviceLabel || '')}&flip=${encodeURIComponent(c.flip || '')}&brightness=${encodeURIComponent(c.brightness ?? 0)}`
+    // Use the dedicated /stream endpoint for configured cameras — it doesn't
+    // sleep waiting for the first frame and doesn't stop the stream on
+    // disconnect, so reconnection is instant.
+    url = `/api/cameras/${encodeURIComponent(c.id)}/stream`
   } else if (c.type === 'rpicam') {
-    url = `/api/cameras/mipi/preview?deviceId=${encodeURIComponent(c.deviceId || '0')}&deviceLabel=${encodeURIComponent(c.deviceLabel || '')}&sensor=${encodeURIComponent(c.sensor || '')}&flip=${encodeURIComponent(c.flip || '')}&brightness=${encodeURIComponent(c.brightness ?? 0)}`
+    url = `/api/cameras/${encodeURIComponent(c.id)}/stream`
   }
   return {
     id: c.id,

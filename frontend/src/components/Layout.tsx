@@ -17,6 +17,8 @@ import {
   Package,
   Plug as PlugIcon,
   Sparkles,
+  BarChart3,
+  Gauge,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 
@@ -26,12 +28,14 @@ const navItems = [
   { to: '/gcode', label: 'G-code', icon: FileCode2 },
   { to: '/queue', label: 'Queue', icon: ListOrdered },
   { to: '/filament', label: 'Filament', icon: Package },
+  { to: '/profiles', label: 'Profiles', icon: Gauge },
   { to: '/plugs', label: 'Plugs', icon: PlugIcon },
   { to: '/analysis', label: 'Analysis', icon: Sparkles },
   { to: '/cameras', label: 'Cameras', icon: Video },
   { to: '/recordings', label: 'Recordings', icon: Film },
   { to: '/pi', label: 'Pi', icon: Cpu },
   { to: '/history', label: 'History', icon: History },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/terminal', label: 'Terminal', icon: Terminal },
   { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/help', label: 'Help', icon: HelpCircle },

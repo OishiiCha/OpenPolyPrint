@@ -15,23 +15,25 @@ import (
 
 // AnalysisRequest contains all the data for an AI analysis of a print frame.
 type AnalysisRequest struct {
-	APIKey       string  `json:"apiKey"`
-	FramePath    string  `json:"framePath"`    // path to JPEG frame
-	FrameDir     string  `json:"frameDir"`     // timelapse frames directory
-	FrameNum     int     `json:"frameNum"`     // frame number
-	ElapsedSec   float64 `json:"elapsedSec"`   // elapsed seconds in print
-	GCodeLine    int     `json:"gcodeLine"`    // current G-code line
-	GCodeSnippet string  `json:"gcodeSnippet"` // surrounding G-code lines
-	Layer        int     `json:"layer"`
-	X            float64 `json:"x"`
-	Y            float64 `json:"y"`
-	Z            float64 `json:"z"`
-	NozzleTemp   float64 `json:"nozzleTemp"`
-	TargetNozzle float64 `json:"targetNozzle"`
-	BedTemp      float64 `json:"bedTemp"`
-	TargetBed    float64 `json:"targetBed"`
-	PrinterName  string  `json:"printerName"`
-	Filename     string  `json:"filename"`
+	APIKey         string  `json:"apiKey"`
+	FramePath      string  `json:"framePath"`    // path to JPEG frame
+	FrameDir       string  `json:"frameDir"`     // timelapse frames directory
+	FrameNum       int     `json:"frameNum"`     // frame number
+	ElapsedSec     float64 `json:"elapsedSec"`   // elapsed seconds in print
+	GCodeLine      int     `json:"gcodeLine"`    // current G-code line
+	GCodeSnippet   string  `json:"gcodeSnippet"` // surrounding G-code lines
+	Layer          int     `json:"layer"`
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	Z              float64 `json:"z"`
+	NozzleTemp     float64 `json:"nozzleTemp"`
+	TargetNozzle   float64 `json:"targetNozzle"`
+	BedTemp        float64 `json:"bedTemp"`
+	TargetBed      float64 `json:"targetBed"`
+	PrinterName    string  `json:"printerName"`
+	Filename       string  `json:"filename"`
+	PromptOverride string  `json:"promptOverride,omitempty"` // user-edited default prompt
+	CustomPrompt   string  `json:"customPrompt,omitempty"`   // additional user instructions
 }
 
 // AnalysisResponse is the result from Gemini.
@@ -55,7 +57,7 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 	}
 
 	// Build the prompt with all context
-	prompt := buildPrompt(req)
+	prompt := buildFinalPrompt(req)
 
 	// Encode image as base64
 	imgBase64 := base64.StdEncoding.EncodeToString(frameData)
@@ -160,21 +162,61 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 	}, nil
 }
 
-func buildPrompt(req AnalysisRequest) string {
+// BuildDefaultPrompt generates the default prompt text based on what data is
+// available in the request. Sections are included conditionally — e.g. if
+// there is no G-code snippet, the G-code section is omitted; if there are no
+// temperatures, the temperature section is omitted.
+func BuildDefaultPrompt(req AnalysisRequest) string {
 	var sb strings.Builder
 	sb.WriteString("You are a 3D printing expert analyzing a timelapse frame from a print job. ")
 	sb.WriteString("Examine the image and the provided data to identify any issues, defects, or areas for improvement.\n\n")
 
-	sb.WriteString(fmt.Sprintf("## Print Context\n"))
-	sb.WriteString(fmt.Sprintf("- Printer: %s\n", req.PrinterName))
-	sb.WriteString(fmt.Sprintf("- File: %s\n", req.Filename))
-	sb.WriteString(fmt.Sprintf("- Elapsed time: %.1f seconds (%.1f minutes)\n", req.ElapsedSec, req.ElapsedSec/60))
-	sb.WriteString(fmt.Sprintf("- Layer: %d\n", req.Layer))
-	sb.WriteString(fmt.Sprintf("- Nozzle position: X=%.2f Y=%.2f Z=%.2f\n", req.X, req.Y, req.Z))
-	sb.WriteString(fmt.Sprintf("- Nozzle temp: %.1f°C (target: %.1f°C)\n", req.NozzleTemp, req.TargetNozzle))
-	sb.WriteString(fmt.Sprintf("- Bed temp: %.1f°C (target: %.1f°C)\n", req.BedTemp, req.TargetBed))
-	sb.WriteString(fmt.Sprintf("- Frame number: %d\n\n", req.FrameNum))
+	// Print Context — only include fields that have values
+	hasContext := false
+	sb.WriteString("## Print Context\n")
+	if req.PrinterName != "" {
+		sb.WriteString(fmt.Sprintf("- Printer: %s\n", req.PrinterName))
+		hasContext = true
+	}
+	if req.Filename != "" {
+		sb.WriteString(fmt.Sprintf("- File: %s\n", req.Filename))
+		hasContext = true
+	}
+	if req.ElapsedSec > 0 {
+		sb.WriteString(fmt.Sprintf("- Elapsed time: %.1f seconds (%.1f minutes)\n", req.ElapsedSec, req.ElapsedSec/60))
+		hasContext = true
+	}
+	if req.Layer > 0 {
+		sb.WriteString(fmt.Sprintf("- Layer: %d\n", req.Layer))
+		hasContext = true
+	}
+	if req.X != 0 || req.Y != 0 || req.Z != 0 {
+		sb.WriteString(fmt.Sprintf("- Nozzle position: X=%.2f Y=%.2f Z=%.2f\n", req.X, req.Y, req.Z))
+		hasContext = true
+	}
+	if req.FrameNum > 0 {
+		sb.WriteString(fmt.Sprintf("- Frame number: %d\n", req.FrameNum))
+		hasContext = true
+	}
+	if !hasContext {
+		sb.WriteString("(no metadata available)\n")
+	}
+	sb.WriteString("\n")
 
+	// Temperature section — only if we have temp data
+	hasTemps := req.NozzleTemp > 0 || req.BedTemp > 0 || req.TargetNozzle > 0 || req.TargetBed > 0
+	if hasTemps {
+		sb.WriteString("## Temperature Data\n")
+		if req.NozzleTemp > 0 || req.TargetNozzle > 0 {
+			sb.WriteString(fmt.Sprintf("- Nozzle temp: %.1f°C (target: %.1f°C)\n", req.NozzleTemp, req.TargetNozzle))
+		}
+		if req.BedTemp > 0 || req.TargetBed > 0 {
+			sb.WriteString(fmt.Sprintf("- Bed temp: %.1f°C (target: %.1f°C)\n", req.BedTemp, req.TargetBed))
+		}
+		sb.WriteString("\n")
+	}
+
+	// G-code section — only if we have a snippet
 	if req.GCodeSnippet != "" {
 		sb.WriteString("## Current G-code (around current position)\n")
 		sb.WriteString("```\n")
@@ -182,12 +224,19 @@ func buildPrompt(req AnalysisRequest) string {
 		sb.WriteString("\n```\n\n")
 	}
 
+	// Analysis Instructions — adapt based on what data is available
 	sb.WriteString("## Analysis Instructions\n")
 	sb.WriteString("1. Describe what you see in the image (print quality, layer adhesion, any visible defects)\n")
 	sb.WriteString("2. Identify any issues: stringing, warping, layer shifting, under-extrusion, over-extrusion, adhesion problems, blobbing, etc.\n")
 	sb.WriteString("3. If issues are found, suggest specific fixes (temperature adjustments, retraction settings, speed changes, etc.)\n")
 	sb.WriteString("4. If the print looks good, confirm that and note any minor improvements\n")
-	sb.WriteString("5. Consider the temperature data — are the actual temps matching targets? Any concerning trends?\n\n")
+	if hasTemps {
+		sb.WriteString("5. Consider the temperature data — are the actual temps matching targets? Any concerning trends?\n")
+	}
+	if req.GCodeSnippet != "" {
+		sb.WriteString("6. Review the current G-code — does the commanded move match what you see in the image?\n")
+	}
+	sb.WriteString("\n")
 
 	sb.WriteString("Format your response as:\n")
 	sb.WriteString("**Observations:** [what you see]\n")
@@ -195,6 +244,22 @@ func buildPrompt(req AnalysisRequest) string {
 	sb.WriteString("**Suggestions:** [specific actionable recommendations]\n")
 
 	return sb.String()
+}
+
+// buildFinalPrompt assembles the prompt sent to Gemini:
+//   - If PromptOverride is set, use it instead of the generated default.
+//   - If CustomPrompt is set, append it as additional user instructions.
+func buildFinalPrompt(req AnalysisRequest) string {
+	var prompt string
+	if req.PromptOverride != "" {
+		prompt = req.PromptOverride
+	} else {
+		prompt = BuildDefaultPrompt(req)
+	}
+	if req.CustomPrompt != "" {
+		prompt += "\n\n## Additional User Instructions\n" + req.CustomPrompt + "\n"
+	}
+	return prompt
 }
 
 // FindFrameForTime returns the frame file path closest to the given elapsed time.

@@ -27,6 +27,12 @@ type Status struct {
 	RemainingTime string    `json:"remainingTime,omitempty"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Error         string    `json:"error,omitempty"`
+
+	// Print progress details (populated when available, e.g. Anker MQTT)
+	LayerNum    int   `json:"layerNum,omitempty"`
+	LayerCount  int   `json:"layerCount,omitempty"`
+	TimeElapsed int64 `json:"timeElapsed,omitempty"` // seconds since print started
+	TotalTime   int64 `json:"totalTime,omitempty"`   // estimated total print time in seconds
 }
 
 // PrinterConfig is the user-supplied configuration for a printer.

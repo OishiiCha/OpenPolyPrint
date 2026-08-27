@@ -156,17 +156,22 @@ func (s *Store) Save(name, printerID string, r io.Reader) (File, error) {
 
 // Load reads a G-code file by id (filename).
 func (s *Store) Load(id string) ([]byte, error) {
-	name, err := url.PathUnescape(id)
-	if err != nil {
-		name = id
-	}
-	base := filepath.Base(name)
-	path := filepath.Join(s.dir, base)
+	path := s.FilePath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 	return data, nil
+}
+
+// FilePath returns the on-disk path for a G-code file by ID.
+func (s *Store) FilePath(id string) string {
+	name, err := url.PathUnescape(id)
+	if err != nil {
+		name = id
+	}
+	base := filepath.Base(name)
+	return filepath.Join(s.dir, base)
 }
 
 // Timeline parses a G-code file and returns timestamped segments for

@@ -18,18 +18,23 @@ import (
 	"time"
 
 	"github.com/lucas/openpolyprint/internal/ai"
+	"github.com/lucas/openpolyprint/internal/analytics"
 	"github.com/lucas/openpolyprint/internal/anker"
 	"github.com/lucas/openpolyprint/internal/anker/proto/config"
+	"github.com/lucas/openpolyprint/internal/auth"
 	"github.com/lucas/openpolyprint/internal/cameras"
 	"github.com/lucas/openpolyprint/internal/envconfig"
 	"github.com/lucas/openpolyprint/internal/filament"
 	"github.com/lucas/openpolyprint/internal/gcode"
 	"github.com/lucas/openpolyprint/internal/history"
 	"github.com/lucas/openpolyprint/internal/integrations"
+	"github.com/lucas/openpolyprint/internal/klipper"
 	"github.com/lucas/openpolyprint/internal/logstore"
+	"github.com/lucas/openpolyprint/internal/maintenance"
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
 	"github.com/lucas/openpolyprint/internal/printsession"
+	"github.com/lucas/openpolyprint/internal/profiles"
 	"github.com/lucas/openpolyprint/internal/push"
 	"github.com/lucas/openpolyprint/internal/queue"
 	"github.com/lucas/openpolyprint/internal/smartplug"
@@ -57,11 +62,18 @@ func buildManager(cfg *config.Config) *printers.Manager {
 	var drivers []printers.Driver
 	if cfg != nil {
 		for _, p := range cfg.Printers {
+			// Anker config.Printer doesn't have a Type field; all printers
+			// from the Anker config are Anker printers.
 			drivers = append(drivers, anker.NewDriver(p, cfg.Account))
 		}
 	}
 	for _, p := range manualPrinters {
-		drivers = append(drivers, printers.NewStaticDriver(p))
+		switch p.Type {
+		case "klipper":
+			drivers = append(drivers, klipper.NewDriver(p))
+		default:
+			drivers = append(drivers, printers.NewStaticDriver(p))
+		}
 	}
 	return printers.NewManager(drivers)
 }
@@ -133,6 +145,13 @@ func safeName(s string) string {
 	s = strings.TrimSuffix(s, ".mkv")
 	s = strings.TrimSuffix(s, ".avi")
 	return s
+}
+
+func absInt64(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func startAutoRecord(cameraMgr *cameras.Manager, printerID, printerName, file, mode string, interval float64, auto map[string]bool) {
@@ -325,7 +344,24 @@ func envSecretConfig() map[string]any {
 		"geminiEnabled":  envconfig.GetBool("GEMINI_ENABLED", false),
 		"envAnkerEmail":  envconfig.Get("ANKER_EMAIL", ""),
 		"envAnkerRegion": envconfig.Get("ANKER_REGION", ""),
+		"authEnabled":    envconfig.Get("AUTH_PASSCODE", "") != "",
 	}
+}
+
+// loadAuthPasscode resolves the auth passcode from env, then settings.json.
+func loadAuthPasscode(settingsFile string) string {
+	if pc := envconfig.Get("AUTH_PASSCODE", ""); pc != "" {
+		return pc
+	}
+	if data, err := os.ReadFile(settingsFile); err == nil {
+		var cfg map[string]any
+		if json.Unmarshal(data, &cfg) == nil {
+			if pc, ok := cfg["authPasscode"].(string); ok {
+				return pc
+			}
+		}
+	}
+	return ""
 }
 
 func main() {
@@ -385,12 +421,20 @@ func main() {
 	tempStore := tempstore.New(600)
 	queueStore := queue.NewStore(settingsDir)
 	filamentStore := filament.NewStore(settingsDir)
+	profileStore := profiles.NewStore(settingsDir)
+	maintStore := maintenance.NewStore(settingsDir)
 	plugMgr := smartplug.NewManager()
 	pushMgr := push.NewManager(settingsDir)
 
 	cameraMgr := cameras.NewManager(settingsDir)
+	// Start all enabled camera streams at startup so frames are immediately
+	// available when a browser connects (no black screen / 1.5s wait).
+	cameraMgr.Streamers().StartAllFromSettings(cameraMgr.Store())
+	// Watchdog: auto-restart streams that crash or go stale.
+	cameraMgr.Streamers().StartWatchdog(cameraMgr.Store())
 	piMgr := pi.NewManagerGroup(settingsDir)
 	sessMgr := printsession.NewManager(filepath.Join(settingsDir, "..", "recordings", "sessions"))
+	promptStore := ai.NewPromptStore(filepath.Join(settingsDir, "ai_prompts.json"))
 
 	intgMgr := integrations.NewManager()
 	if data, err := os.ReadFile(settingsFile); err == nil {
@@ -486,6 +530,68 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	authMgr := auth.NewManager(loadAuthPasscode(settingsFile))
+
+	// Auth endpoints
+	mux.HandleFunc("/api/auth/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"enabled": authMgr.Enabled(),
+		})
+	})
+	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Passcode string `json:"passcode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		token, ok := authMgr.Login(req.Passcode)
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"invalid passcode"}`))
+			return
+		}
+		// Set cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "openpolyprint_session",
+			Value:    token,
+			Path:     "/",
+			MaxAge:   7 * 24 * 3600,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "token": token})
+	})
+	mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		// Extract token from cookie or header
+		if cookie, err := r.Cookie("openpolyprint_session"); err == nil {
+			authMgr.Logout(cookie.Value)
+		}
+		// Clear cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "openpolyprint_session",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -585,6 +691,19 @@ func main() {
 		_ = json.NewEncoder(w).Encode(segments)
 	})
 
+	// G-code thumbnail — returns embedded thumbnail as data URI
+	mux.HandleFunc("/api/gcode/{id}/thumbnail", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		path := gcodeStore.FilePath(id)
+		_, dataURI := gcode.ExtractThumbnail(path)
+		if dataURI == "" {
+			http.Error(w, `{"error":"no thumbnail"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"thumbnail": dataURI})
+	})
+
 	// Timelapse frames — list frame directories and individual frames
 	mux.HandleFunc("/api/timelapse-frames", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -607,6 +726,17 @@ func main() {
 		_ = json.NewEncoder(w).Encode(frames)
 	})
 
+	mux.HandleFunc("/api/timelapse-frames/{dir}/meta", func(w http.ResponseWriter, r *http.Request) {
+		dir := r.PathValue("dir")
+		metas, err := cameras.ListFrameMeta(dir)
+		if err != nil {
+			http.Error(w, `{"error":"failed to list frame metadata"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(metas)
+	})
+
 	// AI analysis — analyze a timelapse frame with G-code + temp context using Gemini
 	mux.HandleFunc("/api/ai/analyze", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -614,17 +744,39 @@ func main() {
 			return
 		}
 		var req struct {
-			APIKey      string  `json:"apiKey"`
-			FrameDir    string  `json:"frameDir"`
-			FrameNum    int     `json:"frameNum"`
-			ElapsedSec  float64 `json:"elapsedSec"`
-			IntervalSec float64 `json:"intervalSec"`
-			GCodeID     string  `json:"gcodeId"`
-			PrinterName string  `json:"printerName"`
-			Filename    string  `json:"filename"`
+			APIKey         string  `json:"apiKey"`
+			FrameDir       string  `json:"frameDir"`
+			FrameNum       int     `json:"frameNum"`
+			ElapsedSec     float64 `json:"elapsedSec"`
+			IntervalSec    float64 `json:"intervalSec"`
+			GCodeID        string  `json:"gcodeId"`
+			PrinterName    string  `json:"printerName"`
+			Filename       string  `json:"filename"`
+			SessionID      string  `json:"sessionId"`
+			PromptOverride string  `json:"promptOverride"`
+			CustomPrompt   string  `json:"customPrompt"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Resolve API key: request > settings.json > env
+		apiKey := req.APIKey
+		if apiKey == "" {
+			if data, err := os.ReadFile(settingsFile); err == nil {
+				var cfg map[string]any
+				_ = json.Unmarshal(data, &cfg)
+				if v, ok := cfg["geminiApiKey"].(string); ok {
+					apiKey = v
+				}
+			}
+		}
+		if apiKey == "" {
+			apiKey = envconfig.Get("GEMINI_API_KEY", "")
+		}
+		if apiKey == "" {
+			http.Error(w, `{"error":"no Gemini API key configured. Set one in Settings or via GEMINI_API_KEY env var."}`, http.StatusBadRequest)
 			return
 		}
 
@@ -674,40 +826,67 @@ func main() {
 			}
 		}
 
-		// Get temperature at this time from tempstore
+		// Get temperature at this time
+		// If a session ID is provided, use the session's temp samples (accurate
+		// temp at the given elapsed time). Otherwise fall back to tempstore.
 		var nozzleTemp, targetNozzle, bedTemp, targetBed float64
-		// Get the most recent temperature sample (we don't have print start time
-		// to correlate elapsed time precisely, so latest is best approximation)
-		allTemps := tempStore.GetAll()
-		for _, samples := range allTemps {
-			if len(samples) > 0 {
-				last := samples[len(samples)-1]
-				nozzleTemp = last.Nozzle
-				targetNozzle = last.TargetNozzle
-				bedTemp = last.Bed
-				targetBed = last.TargetBed
+		if req.SessionID != "" {
+			if sess, err := sessMgr.GetSavedSession(req.SessionID); err == nil && len(sess.TempSamples) > 0 {
+				// Find the temp sample closest to the elapsed time
+				// Temp samples have unix timestamps; convert elapsed to absolute time
+				targetTime := sess.StartTime.Add(time.Duration(req.ElapsedSec * float64(time.Second)))
+				var bestSample *printsession.TempSample
+				var bestDiff time.Duration = 1 << 62
+				for i := range sess.TempSamples {
+					diff := time.Duration(absInt64(sess.TempSamples[i].Time - targetTime.Unix()))
+					if diff < bestDiff {
+						bestDiff = diff
+						bestSample = &sess.TempSamples[i]
+					}
+				}
+				if bestSample != nil {
+					nozzleTemp = bestSample.Nozzle
+					targetNozzle = bestSample.TargetNozzle
+					bedTemp = bestSample.Bed
+					targetBed = bestSample.TargetBed
+				}
 			}
-			break
+		}
+		if nozzleTemp == 0 && targetNozzle == 0 {
+			// Fall back to tempstore latest
+			allTemps := tempStore.GetAll()
+			for _, samples := range allTemps {
+				if len(samples) > 0 {
+					last := samples[len(samples)-1]
+					nozzleTemp = last.Nozzle
+					targetNozzle = last.TargetNozzle
+					bedTemp = last.Bed
+					targetBed = last.TargetBed
+				}
+				break
+			}
 		}
 
 		analysisReq := ai.AnalysisRequest{
-			APIKey:       req.APIKey,
-			FramePath:    framePath,
-			FrameDir:     req.FrameDir,
-			FrameNum:     frameNum,
-			ElapsedSec:   req.ElapsedSec,
-			GCodeLine:    0,
-			GCodeSnippet: gcodeSnippet,
-			Layer:        layer,
-			X:            x,
-			Y:            y,
-			Z:            z,
-			NozzleTemp:   nozzleTemp,
-			TargetNozzle: targetNozzle,
-			BedTemp:      bedTemp,
-			TargetBed:    targetBed,
-			PrinterName:  req.PrinterName,
-			Filename:     req.Filename,
+			APIKey:         apiKey,
+			FramePath:      framePath,
+			FrameDir:       req.FrameDir,
+			FrameNum:       frameNum,
+			ElapsedSec:     req.ElapsedSec,
+			GCodeLine:      0,
+			GCodeSnippet:   gcodeSnippet,
+			Layer:          layer,
+			X:              x,
+			Y:              y,
+			Z:              z,
+			NozzleTemp:     nozzleTemp,
+			TargetNozzle:   targetNozzle,
+			BedTemp:        bedTemp,
+			TargetBed:      targetBed,
+			PrinterName:    req.PrinterName,
+			Filename:       req.Filename,
+			PromptOverride: req.PromptOverride,
+			CustomPrompt:   req.CustomPrompt,
 		}
 
 		result, err := ai.Analyze(analysisReq)
@@ -719,6 +898,139 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
+	})
+
+	// AI prompt — generate the default prompt based on session/frame context
+	mux.HandleFunc("/api/ai/prompt", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			FrameDir    string  `json:"frameDir"`
+			FrameNum    int     `json:"frameNum"`
+			ElapsedSec  float64 `json:"elapsedSec"`
+			IntervalSec float64 `json:"intervalSec"`
+			GCodeID     string  `json:"gcodeId"`
+			PrinterName string  `json:"printerName"`
+			Filename    string  `json:"filename"`
+			SessionID   string  `json:"sessionId"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Build a mock AnalysisRequest with whatever data is available
+		// to generate the default prompt
+		mockReq := ai.AnalysisRequest{
+			FrameNum:    req.FrameNum,
+			ElapsedSec:  req.ElapsedSec,
+			PrinterName: req.PrinterName,
+			Filename:    req.Filename,
+		}
+
+		// Get G-code context if available
+		if req.GCodeID != "" {
+			segments, err := gcodeStore.Timeline(req.GCodeID)
+			if err == nil && len(segments) > 0 {
+				seg := gcode.SegmentAtTime(segments, req.ElapsedSec)
+				if seg != nil {
+					mockReq.Layer = seg.Layer
+					mockReq.X, mockReq.Y, mockReq.Z = seg.X, seg.Y, seg.Z
+					startLine := seg.LineNum - 5
+					if startLine < 1 {
+						startLine = 1
+					}
+					endLine := seg.LineNum + 5
+					data, _ := gcodeStore.Load(req.GCodeID)
+					lines := strings.Split(string(data), "\n")
+					if endLine > len(lines) {
+						endLine = len(lines)
+					}
+					if startLine <= len(lines) {
+						mockReq.GCodeSnippet = strings.Join(lines[startLine-1:endLine], "\n")
+					}
+				}
+			}
+		}
+
+		// Get temp data from session if available
+		if req.SessionID != "" {
+			if sess, err := sessMgr.GetSavedSession(req.SessionID); err == nil && len(sess.TempSamples) > 0 {
+				targetTime := sess.StartTime.Add(time.Duration(req.ElapsedSec * float64(time.Second)))
+				var bestSample *printsession.TempSample
+				var bestDiff int64 = 1 << 60
+				for i := range sess.TempSamples {
+					diff := absInt64(sess.TempSamples[i].Time - targetTime.Unix())
+					if diff < bestDiff {
+						bestDiff = diff
+						bestSample = &sess.TempSamples[i]
+					}
+				}
+				if bestSample != nil {
+					mockReq.NozzleTemp = bestSample.Nozzle
+					mockReq.TargetNozzle = bestSample.TargetNozzle
+					mockReq.BedTemp = bestSample.Bed
+					mockReq.TargetBed = bestSample.TargetBed
+				}
+			}
+		}
+
+		prompt := ai.BuildDefaultPrompt(mockReq)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"prompt": prompt})
+	})
+
+	// AI prompt presets — CRUD
+	mux.HandleFunc("/api/ai/prompts", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			presets, err := promptStore.List()
+			if err != nil {
+				http.Error(w, `{"error":"failed to list prompts"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"prompts": presets})
+		case http.MethodPost:
+			var req struct {
+				ID     string `json:"id"`
+				Name   string `json:"name"`
+				Prompt string `json:"prompt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if req.Name == "" {
+				http.Error(w, `{"error":"name required"}`, http.StatusBadRequest)
+				return
+			}
+			preset, err := promptStore.Save(req.ID, req.Name, req.Prompt)
+			if err != nil {
+				http.Error(w, `{"error":"failed to save prompt"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(preset)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/ai/prompts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		if err := promptStore.Delete(id); err != nil {
+			http.Error(w, `{"error":"prompt not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
 	cameras.Mount(mux, cameraMgr)
@@ -764,10 +1076,15 @@ func main() {
 					Enabled bool              `json:"enabled"`
 					Fields  map[string]string `json:"fields"`
 				} `json:"integrations"`
+				AuthPasscode string `json:"authPasscode"`
 			}
 			_ = json.Unmarshal(body, &openpolyprintSettings)
 			for id, i := range openpolyprintSettings.Integrations {
 				intgMgr.SetConfig(id, i.Fields)
+			}
+			// Update auth passcode if changed (env takes precedence — don't override env)
+			if envconfig.Get("AUTH_PASSCODE", "") == "" {
+				authMgr.SetPasscode(openpolyprintSettings.AuthPasscode)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -1457,6 +1774,102 @@ func main() {
 		}
 	})
 
+	// ── Print Profiles API ─────────────────────────────────────────────
+	mux.HandleFunc("/api/profiles", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(profileStore.List())
+		case http.MethodPost:
+			var p profiles.Profile
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(profileStore.Add(p))
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPut:
+			var p profiles.Profile
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !profileStore.Update(id, p) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(p)
+		case http.MethodDelete:
+			if !profileStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	// ── Maintenance API ────────────────────────────────────────────────
+	mux.HandleFunc("/api/maintenance", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			// Compute statuses with empty print hours for now
+			_ = json.NewEncoder(w).Encode(maintStore.Statuses(nil))
+		case http.MethodPost:
+			var rem maintenance.Reminder
+			if err := json.NewDecoder(r.Body).Decode(&rem); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(maintStore.Add(rem))
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/maintenance/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPut:
+			var rem maintenance.Reminder
+			if err := json.NewDecoder(r.Body).Decode(&rem); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !maintStore.Update(id, rem) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(rem)
+		case http.MethodDelete:
+			if !maintStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodPost:
+			// Mark as performed
+			if !maintStore.MarkPerformed(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc("/api/temps", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(tempStore.GetAll())
@@ -1798,6 +2211,71 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessMgr.ActiveSessions()})
 	})
 
+	// ---- Saved session endpoints (for AI analysis page) ----
+	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		sessions, err := sessMgr.ListSavedSessions()
+		if err != nil {
+			http.Error(w, `{"error":"failed to list sessions"}`, http.StatusInternalServerError)
+			return
+		}
+		// Check for matching gcode files
+		gcodeFiles, _ := gcodeStore.List()
+		gcodeByName := make(map[string]string) // name -> ID
+		for _, f := range gcodeFiles {
+			gcodeByName[f.Name] = f.ID
+		}
+		for i := range sessions {
+			if id, ok := gcodeByName[sessions[i].FileName]; ok {
+				sessions[i].HasGcode = true
+				sessions[i].GcodeID = id
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessions})
+	})
+
+	mux.HandleFunc("/api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		sess, err := sessMgr.GetSavedSession(id)
+		if err != nil {
+			http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+			return
+		}
+		// Include timelapse dir and gcode ID
+		timelapseDir := ""
+		timestamp := sess.StartTime.Format("20060102-150405")
+		if tlEntries, err := os.ReadDir("recordings/timelapse"); err == nil {
+			for _, e := range tlEntries {
+				if e.IsDir() && strings.HasSuffix(e.Name(), "_frames") && strings.Contains(e.Name(), timestamp) {
+					timelapseDir = e.Name()
+					break
+				}
+			}
+		}
+		gcodeID := ""
+		gcodeFiles, _ := gcodeStore.List()
+		for _, f := range gcodeFiles {
+			if f.Name == sess.FileName {
+				gcodeID = f.ID
+				break
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session":      sess,
+			"timelapseDir": timelapseDir,
+			"gcodeId":      gcodeID,
+		})
+	})
+
 	// ---- Manual recording per printer (video or timelapse) ----
 	mux.HandleFunc("/api/printers/{id}/record/start", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1945,6 +2423,46 @@ func main() {
 		_ = json.NewEncoder(w).Encode(status)
 	})
 
+	mux.HandleFunc("/api/analytics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(analytics.Compute(historyStore, filamentStore))
+	})
+
+	// ── Data Export ────────────────────────────────────────────────────
+	mux.HandleFunc("/api/export", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		export := map[string]any{
+			"exportedAt":  time.Now().Format(time.RFC3339),
+			"version":     "1.0",
+			"history":     historyStore.List(),
+			"filament":    filamentStore.List(),
+			"profiles":    profileStore.List(),
+			"maintenance": maintStore.List(),
+			"queue":       queueStore.List(),
+			"analytics":   analytics.Compute(historyStore, filamentStore),
+		}
+		// Include settings (without secrets)
+		if data, err := os.ReadFile(settingsFile); err == nil {
+			var cfg map[string]any
+			if json.Unmarshal(data, &cfg) == nil {
+				// Strip sensitive keys
+				delete(cfg, "geminiApiKey")
+				delete(cfg, "authPasscode")
+				export["settings"] = cfg
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", `attachment; filename="openpolyprint-export.json"`)
+		_ = json.NewEncoder(w).Encode(export)
+	})
+
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -2045,13 +2563,25 @@ func main() {
 		})
 	}
 
+	// Wrap mux with auth middleware
+	authedHandler := authMgr.Middleware(mux)
+
+	// Periodically clean up expired sessions
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			authMgr.Cleanup()
+		}
+	}()
+
 	// HTTP server (port 80) — always serves the app
 	httpAddr := *addr
 	if *enableTLS {
 		// When TLS is on, the -addr port is for HTTPS; HTTP goes to :80
 		httpAddr = ":80"
 	}
-	httpServer := &http.Server{Addr: httpAddr, Handler: mux}
+	httpServer := &http.Server{Addr: httpAddr, Handler: authedHandler}
 	go func() {
 		fmt.Printf("OpenPolyPrint listening on http://localhost%s\n", httpAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -2130,7 +2660,7 @@ func main() {
 				fmt.Fprint(w, tlsautocert.LinuxInstallScript(host))
 			})
 
-			tlsServer = &http.Server{Addr: tlsAddr, Handler: mux}
+			tlsServer = &http.Server{Addr: tlsAddr, Handler: authedHandler}
 			go func() {
 				fmt.Printf("OpenPolyPrint listening on https://localhost%s\n", tlsAddr)
 				fmt.Printf("  CA auto-installed on this host. For other devices:\n")

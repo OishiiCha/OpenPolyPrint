@@ -11,6 +11,7 @@ import {
   Camera as CameraIcon,
   Circle,
   CircleDot,
+  Download,
   Eye,
   EyeOff,
   FileCode2,
@@ -326,6 +327,50 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
               <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                 {printer.remainingTime} left
               </span>
+            </div>
+
+            {/* Layer + time info grid */}
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {/* Layer / total layers */}
+              {(printer.layerCount ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                    <Layers className="h-3 w-3" /> Layer
+                  </p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {printer.layerNum || 0} / {printer.layerCount}
+                  </p>
+                </div>
+              )}
+              {/* Run time (elapsed) */}
+              {(printer.timeElapsed ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                    <Timer className="h-3 w-3" /> Run time
+                  </p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {formatDuration(printer.timeElapsed!)}
+                  </p>
+                </div>
+              )}
+              {/* Start time (derived from updatedAt - elapsed) */}
+              {(printer.timeElapsed ?? 0) > 0 && printer.updated_at && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="font-mono text-[10px] text-slate-400">Started</p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {new Date(new Date(printer.updated_at).getTime() - printer.timeElapsed! * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              )}
+              {/* Estimated end time (updatedAt + remaining seconds) */}
+              {(printer.totalTime ?? 0) > 0 && printer.updated_at && (printer.timeElapsed ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="font-mono text-[10px] text-slate-400">Est. end</p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {new Date(new Date(printer.updated_at).getTime() + (printer.totalTime! - printer.timeElapsed!) * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1104,6 +1149,15 @@ export function PrinterDetail() {
 
 function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [thumbnail, setThumbnail] = useState<string | null>(null)
+
+  useEffect(() => {
+    setThumbnail(null)
+    fetch(`/api/gcode/${encodeURIComponent(file.id)}/thumbnail`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.thumbnail) setThumbnail(data.thumbnail) })
+      .catch(() => {})
+  }, [file.id])
 
   return (
     <div
@@ -1111,9 +1165,17 @@ function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) =
       style={{ borderTopColor: '#8b5cf6', boxShadow: '0 4px 6px -1px #8b5cf620' }}
     >
       <div className="flex items-center gap-4">
-        <div className="rounded-lg bg-violet-900/30 p-3">
-          <FileCode2 className="h-6 w-6 text-violet-400" />
-        </div>
+        {thumbnail ? (
+          <img
+            src={thumbnail}
+            alt={file.name}
+            className="h-14 w-14 rounded-lg object-cover border border-slate-700"
+          />
+        ) : (
+          <div className="rounded-lg bg-violet-900/30 p-3">
+            <FileCode2 className="h-6 w-6 text-violet-400" />
+          </div>
+        )}
         <div>
           <h3 className="font-mono font-medium text-slate-100">{file.name}</h3>
           <p className="font-mono text-xs text-slate-400">
@@ -3286,6 +3348,7 @@ function AddPrinterModal({
           />
           <p className="font-mono text-xs text-slate-500">
             For AnkerMake printers, log in via Settings to auto-discover.
+            For Klipper, use the Moonraker URL (e.g. <code className="text-slate-400">http://192.168.1.50:7125</code>).
           </p>
           {error && (
             <p className="rounded-lg border border-rose-600 bg-rose-950/30 p-3 font-mono text-sm text-rose-400">
@@ -3885,6 +3948,41 @@ export function Settings() {
               />
             </label>
           </div>
+        </Card>
+
+        <Card>
+          <h3 className="mb-2 font-semibold text-slate-900 dark:text-white">Access passcode</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Set a passcode to require authentication before accessing the app.
+            Leave empty to disable (open access on your network).
+            Can also be set via the <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">AUTH_PASSCODE</code> env var.
+          </p>
+          <input
+            type="password"
+            value={config.authPasscode}
+            onChange={(e) => update({ authPasscode: e.target.value })}
+            placeholder="No passcode (open access)"
+            className={inputClass}
+          />
+          {config.authPasscode && (
+            <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
+              Passcode is set. You'll need to enter it after reloading the page.
+            </p>
+          )}
+        </Card>
+
+        <Card>
+          <h3 className="mb-2 font-semibold text-slate-900 dark:text-white">Data export</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Download all your data (history, filament, profiles, maintenance, queue, analytics) as a JSON file.
+            Sensitive data (API keys, passcodes) is excluded.
+          </p>
+          <a
+            href="/api/export"
+            className="flex items-center justify-center gap-2 rounded-lg bg-slate-700 py-2.5 text-sm font-medium text-white hover:bg-slate-600"
+          >
+            <Download className="h-4 w-4" /> Download backup
+          </a>
         </Card>
 
         <Card className="lg:col-span-2">

@@ -22,6 +22,7 @@ export interface AppConfig {
   slicerTarget: string
   geminiApiKey: string
   geminiEnabled: boolean
+  authPasscode: string
   notifyFinished: boolean
   notifyFailed: boolean
   providers: {
@@ -68,6 +69,7 @@ export function defaultConfig(): AppConfig {
     slicerTarget: '',
     geminiApiKey: '',
     geminiEnabled: false,
+    authPasscode: '',
     notifyFinished: true,
     notifyFailed: true,
     providers: {

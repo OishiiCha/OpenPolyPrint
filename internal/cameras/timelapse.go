@@ -2,6 +2,7 @@ package cameras
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -296,4 +297,43 @@ func ListFrames(dir string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// FrameMeta is the metadata for a single timelapse frame.
+type FrameMeta struct {
+	Frame          int     `json:"frame"`
+	Timestamp      int64   `json:"timestamp"`      // unix millis
+	ElapsedSeconds float64 `json:"elapsedSeconds"` // seconds since recording start
+	CameraID       string  `json:"cameraId"`
+}
+
+// ListFrameMeta returns metadata for all frames in a frame directory.
+// It reads the companion .json files written alongside each .jpg frame.
+func ListFrameMeta(dir string) ([]FrameMeta, error) {
+	path := filepath.Join("recordings/timelapse", dir)
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var metas []FrameMeta
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(path, name))
+		if err != nil {
+			continue
+		}
+		var meta FrameMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		metas = append(metas, meta)
+	}
+	sort.Slice(metas, func(i, j int) bool { return metas[i].Frame < metas[j].Frame })
+	return metas, nil
 }
