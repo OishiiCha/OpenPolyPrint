@@ -125,14 +125,28 @@ export async function loadConfigWithEnv(): Promise<AppConfig> {
       envAnkerEmail?: string
       envAnkerRegion?: string
     }
-    // Env-based values from backend override localStorage
-    return {
+    // Merge remote over local, but only override specific fields when the
+    // backend actually provides them (not undefined). This prevents env
+    // defaults (e.g. geminiEnabled=false) from clobbering saved values.
+    const merged: AppConfig = {
       ...local,
       ...remote,
-      // Only override if the env value is non-empty (otherwise keep local)
+      // Only override geminiApiKey if the env value is non-empty
       geminiApiKey: remote.geminiApiKey || local.geminiApiKey,
-      geminiEnabled: remote.geminiEnabled ?? local.geminiEnabled,
-    } as AppConfig
+      // Only override geminiEnabled if the backend explicitly sent it
+      geminiEnabled: remote.geminiEnabled !== undefined ? remote.geminiEnabled : local.geminiEnabled,
+      // Ensure nested objects are properly merged (not replaced wholesale)
+      providers: {
+        anker: { ...local.providers.anker, ...remote.providers?.anker },
+        flashforge: { ...local.providers.flashforge, ...remote.providers?.flashforge },
+        klipper: { ...local.providers.klipper, ...remote.providers?.klipper },
+        other: { ...local.providers.other, ...remote.providers?.other },
+      },
+      integrations: { ...local.integrations, ...remote.integrations },
+      timelapse: { ...local.timelapse, ...remote.timelapse },
+      autoRecord: { ...local.autoRecord, ...remote.autoRecord },
+    }
+    return merged
   } catch {
     return local
   }

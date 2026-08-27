@@ -339,13 +339,24 @@ func findDistDir() string {
 // envSecretConfig returns config values sourced from environment variables
 // (or .env file). These take precedence over settings.json values.
 func envSecretConfig() map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"geminiApiKey":   envconfig.Get("GEMINI_API_KEY", ""),
-		"geminiEnabled":  envconfig.GetBool("GEMINI_ENABLED", false),
 		"envAnkerEmail":  envconfig.Get("ANKER_EMAIL", ""),
 		"envAnkerRegion": envconfig.Get("ANKER_REGION", ""),
 		"authEnabled":    envconfig.Get("AUTH_PASSCODE", "") != "",
 	}
+	// Only include geminiEnabled if the env var is explicitly set —
+	// otherwise the default (false) would override the saved value in
+	// settings.json every time the config is loaded.
+	if v, ok := os.LookupEnv("GEMINI_ENABLED"); ok {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes", "on":
+			m["geminiEnabled"] = true
+		case "false", "0", "no", "off":
+			m["geminiEnabled"] = false
+		}
+	}
+	return m
 }
 
 // loadAuthPasscode resolves the auth passcode from env, then settings.json.
@@ -1048,10 +1059,18 @@ func main() {
 				config = map[string]any{}
 			}
 
-			// Merge env-based secrets (env takes precedence over settings.json)
+			// Merge env-based secrets (env takes precedence over settings.json).
+			// Only merge non-empty string values — boolean false from env
+			// defaults must not override saved true values in settings.json.
 			envSecrets := envSecretConfig()
 			for k, v := range envSecrets {
-				if v != "" {
+				if s, ok := v.(string); ok {
+					if s != "" {
+						config[k] = v
+					}
+				} else {
+					// Non-string values (booleans) are only present when
+					// explicitly set, so always merge them.
 					config[k] = v
 				}
 			}
