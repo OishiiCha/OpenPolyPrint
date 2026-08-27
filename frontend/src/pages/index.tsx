@@ -3779,12 +3779,27 @@ export function Settings() {
     loadAnker()
   }, [ankerLoginOpen])
 
-  // Load env-based config from backend (secrets from .env file)
+  // Load env-based config from backend (secrets from .env file).
+  // Only apply env-only values (geminiApiKey from .env) — don't let the
+  // backend response overwrite local state for fields the user can edit
+  // in the UI, since settings.json may be stale or missing fields that
+  // only exist in localStorage.
   useEffect(() => {
     loadConfigWithEnv().then((envConfig) => {
-      setConfig(envConfig)
+      setConfig((current) => {
+        // Preserve any unsaved local changes
+        if (dirty) return current
+        // Only take env-only values from the backend (e.g. geminiApiKey
+        // from .env file). Keep everything else from current local state
+        // which was loaded from localStorage (the source of truth for
+        // UI-toggled settings like geminiEnabled, dark mode, etc.)
+        return {
+          ...current,
+          geminiApiKey: envConfig.geminiApiKey || current.geminiApiKey,
+        }
+      })
     })
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const inputClass =
     'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'

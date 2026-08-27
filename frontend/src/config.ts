@@ -110,10 +110,11 @@ export function loadConfig(): AppConfig {
   return defaultConfig()
 }
 
-// loadConfigWithEnv fetches the backend config (which includes env-based
-// secrets) and merges it with the localStorage config. Env-based values
-// from the backend take precedence for secrets (geminiApiKey, etc.).
-// Falls back to localStorage-only if the backend is unreachable.
+// loadConfigWithEnv fetches env-based secrets from the backend (e.g.
+// GEMINI_API_KEY from .env) and merges them with the localStorage config.
+// Only env-derived values override localStorage — UI-toggled settings like
+// geminiEnabled, dark mode, etc. always come from localStorage (the source
+// of truth for user-editable preferences).
 export async function loadConfigWithEnv(): Promise<AppConfig> {
   const local = loadConfig()
   try {
@@ -125,28 +126,17 @@ export async function loadConfigWithEnv(): Promise<AppConfig> {
       envAnkerEmail?: string
       envAnkerRegion?: string
     }
-    // Merge remote over local, but only override specific fields when the
-    // backend actually provides them (not undefined). This prevents env
-    // defaults (e.g. geminiEnabled=false) from clobbering saved values.
-    const merged: AppConfig = {
+    // Only take env-only values from the backend. localStorage is the
+    // source of truth for all UI-toggled settings.
+    return {
       ...local,
-      ...remote,
-      // Only override geminiApiKey if the env value is non-empty
+      // Env-based secrets (from .env file via backend)
       geminiApiKey: remote.geminiApiKey || local.geminiApiKey,
-      // Only override geminiEnabled if the backend explicitly sent it
+      // geminiEnabled from env overrides localStorage; otherwise keep local.
+      // The backend only includes geminiEnabled when GEMINI_ENABLED env var
+      // is explicitly set — otherwise it's absent and we keep the local value.
       geminiEnabled: remote.geminiEnabled !== undefined ? remote.geminiEnabled : local.geminiEnabled,
-      // Ensure nested objects are properly merged (not replaced wholesale)
-      providers: {
-        anker: { ...local.providers.anker, ...remote.providers?.anker },
-        flashforge: { ...local.providers.flashforge, ...remote.providers?.flashforge },
-        klipper: { ...local.providers.klipper, ...remote.providers?.klipper },
-        other: { ...local.providers.other, ...remote.providers?.other },
-      },
-      integrations: { ...local.integrations, ...remote.integrations },
-      timelapse: { ...local.timelapse, ...remote.timelapse },
-      autoRecord: { ...local.autoRecord, ...remote.autoRecord },
     }
-    return merged
   } catch {
     return local
   }
@@ -159,7 +149,7 @@ export function saveConfig(config: AppConfig): void {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
-  }).catch(() => {
-    // backend not running; localStorage is the source of truth
+  }).catch((err) => {
+    console.error('[config] failed to save to backend:', err)
   })
 }
