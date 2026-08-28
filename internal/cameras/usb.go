@@ -135,6 +135,19 @@ func (u *UsbCameraStreamer) IsRunning() bool {
 	return u.running
 }
 
+// GetLastFrame returns a copy of the most recent JPEG frame, or nil if no
+// frame has been received yet.
+func (u *UsbCameraStreamer) GetLastFrame() []byte {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.lastFrame == nil {
+		return nil
+	}
+	out := make([]byte, len(u.lastFrame))
+	copy(out, u.lastFrame)
+	return out
+}
+
 // runLoop manages the ffmpeg lifecycle with automatic restart on failure.
 func (u *UsbCameraStreamer) runLoop() {
 	for {
@@ -779,6 +792,16 @@ func (m *UsbStreamerManager) GetStream(cameraID string) *UsbCameraStreamer {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.streamers[cameraID]
+}
+
+// GetFrameForCamera returns the latest JPEG frame for the given camera ID,
+// or nil if the camera stream is not running or has no frames yet.
+func (m *UsbStreamerManager) GetFrameForCamera(cameraID string) []byte {
+	streamer := m.GetStream(cameraID)
+	if streamer == nil {
+		return nil
+	}
+	return streamer.GetLastFrame()
 }
 
 // StopAll stops all active streamers.

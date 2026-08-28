@@ -26,6 +26,7 @@ import {
   Search,
   Settings as SettingsIcon,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Thermometer,
   Timer,
@@ -40,6 +41,7 @@ import { useCameras } from '../hooks/useCameras'
 import { usePiReadings } from '../hooks/usePi'
 import { isTest } from '../data/mock'
 import { integrationIcons, integrations, testIntegration, type Integration } from '../integrations'
+import { AIChatSidebar } from '../components/AIChatSidebar'
 import type { Camera, GCodeFile, PrintRecord, Printer } from '../types'
 
 const statusColor: Record<string, string> = {
@@ -191,6 +193,7 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
   const [recordMenuOpen, setRecordMenuOpen] = useState(false)
+  const [showAIChat, setShowAIChat] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
 
   // Poll recording status
@@ -409,6 +412,17 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
             )}
           </div>
         )}
+
+        {/* Analyze with AI button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowAIChat(true)
+          }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-3 py-2 text-sm font-medium text-white hover:from-blue-500 hover:to-purple-500"
+        >
+          <Sparkles className="h-4 w-4" /> Analyze with AI
+        </button>
       </Card>
 
       {showConfirm && (
@@ -444,6 +458,14 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
             )
           }}
           onClose={() => setShowPauseConfirm(false)}
+        />
+      )}
+
+      {showAIChat && (
+        <AIChatSidebar
+          printerId={printer.id}
+          printerName={printer.name}
+          onClose={() => setShowAIChat(false)}
         />
       )}
     </>
