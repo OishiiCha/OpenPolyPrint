@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare } from 'lucide-react'
 import type { Printer } from '../types'
 
@@ -208,7 +208,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
           </div>
         )}
 
-        {conversation?.messages.map((msg, idx) => (
+        {conversation?.messages?.map((msg, idx) => (
           <div
             key={idx}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -305,7 +305,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
 }
 
 // renderText renders simple markdown-like formatting (bold, headers, lists)
-function renderText(text: string): React.ReactNode {
+function renderText(text: string): ReactNode {
   const lines = text.split('\n')
   return lines.map((line, idx) => {
     const parts = line.split(/(\*\*[^*]+\*\*)/g)

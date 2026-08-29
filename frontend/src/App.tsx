@@ -25,6 +25,7 @@ import { Analytics } from './pages/Analytics'
 import { Profiles } from './pages/Profiles'
 import { Login } from './pages/Login'
 import { BackgroundStreams } from './components/BackgroundStreams'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { useAuth } from './hooks/useAuth'
 
 function useIsPhone() {
@@ -71,29 +72,31 @@ function App() {
   return (
     <BrowserRouter>
       <BackgroundStreams />
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="printers" element={<Printers />} />
-          <Route path="printers/:id" element={<PrinterDetail />} />
-          <Route path="printers/:id/leveling" element={<BedLeveling />} />
-          <Route path="gcode" element={<GCode />} />
-          <Route path="gcode/:id" element={<GCodeDetail />} />
-          <Route path="queue" element={<PrintQueue />} />
-          <Route path="filament" element={<Filament />} />
-          <Route path="profiles" element={<Profiles />} />
-          <Route path="plugs" element={<SmartPlugs />} />
-          <Route path="analysis" element={<PrintAnalysis />} />
-          <Route path="analytics" element={<Analytics />} />
-          <Route path="cameras" element={<Cameras />} />
-          <Route path="recordings" element={<Recordings />} />
-          <Route path="pi" element={<Pi />} />
-          <Route path="history" element={<History />} />
-          <Route path="terminal" element={<Terminal />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="help" element={<Help />} />
-        </Route>
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="printers" element={<Printers />} />
+            <Route path="printers/:id" element={<PrinterDetail />} />
+            <Route path="printers/:id/leveling" element={<BedLeveling />} />
+            <Route path="gcode" element={<GCode />} />
+            <Route path="gcode/:id" element={<GCodeDetail />} />
+            <Route path="queue" element={<PrintQueue />} />
+            <Route path="filament" element={<Filament />} />
+            <Route path="profiles" element={<Profiles />} />
+            <Route path="plugs" element={<SmartPlugs />} />
+            <Route path="analysis" element={<PrintAnalysis />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="cameras" element={<Cameras />} />
+            <Route path="recordings" element={<Recordings />} />
+            <Route path="pi" element={<Pi />} />
+            <Route path="history" element={<History />} />
+            <Route path="terminal" element={<Terminal />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="help" element={<Help />} />
+          </Route>
+        </Routes>
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }

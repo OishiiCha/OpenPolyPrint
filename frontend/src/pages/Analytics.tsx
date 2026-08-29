@@ -261,7 +261,7 @@ export function Analytics() {
         )}
 
         {/* Recent failures */}
-        {stats.recentFailures.length > 0 && (
+        {(stats.recentFailures?.length ?? 0) > 0 && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
               <AlertTriangle className="h-4 w-4 text-rose-500" /> Recent failures
@@ -279,7 +279,7 @@ export function Analytics() {
         )}
 
         {/* Longest prints */}
-        {stats.longestPrints.length > 0 && (
+        {(stats.longestPrints?.length ?? 0) > 0 && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="mb-3 font-semibold text-slate-900 dark:text-white">Longest prints</h3>
             <div className="space-y-2">
