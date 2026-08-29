@@ -1179,13 +1179,15 @@ func main() {
 			Message        string `json:"message"`
 			AttachSnapshot bool   `json:"attachSnapshot"`
 			PrinterID      string `json:"printerId"`
+			GcodeFileID    string `json:"gcodeFileId"`
+			GcodeFileName  string `json:"gcodeFileName"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 			return
 		}
-		if req.Message == "" && !req.AttachSnapshot {
-			http.Error(w, `{"error":"message or snapshot required"}`, http.StatusBadRequest)
+		if req.Message == "" && !req.AttachSnapshot && req.GcodeFileID == "" {
+			http.Error(w, `{"error":"message, snapshot, or gcode file required"}`, http.StatusBadRequest)
 			return
 		}
 
@@ -1202,6 +1204,33 @@ func main() {
 			snapshotText, paths := captureSnapshot(convID, req.PrinterID)
 			msgText += snapshotText
 			imagePaths = paths
+		}
+
+		// Attach gcode file content if requested
+		if req.GcodeFileID != "" {
+			gcodeData, err := gcodeStore.Load(req.GcodeFileID)
+			if err != nil {
+				errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to load gcode: %s", err.Error())})
+				http.Error(w, string(errJSON), http.StatusBadRequest)
+				return
+			}
+			gcodeText := string(gcodeData)
+			// Truncate very large gcode files to avoid exceeding token limits
+			maxGcode := 50000
+			truncated := false
+			if len(gcodeText) > maxGcode {
+				gcodeText = gcodeText[:maxGcode]
+				truncated = true
+			}
+			fileName := req.GcodeFileName
+			if fileName == "" {
+				fileName = req.GcodeFileID
+			}
+			msgText += fmt.Sprintf("\n\n--- G-code file: %s ---\n%s", fileName, gcodeText)
+			if truncated {
+				msgText += "\n... (truncated, file too large for full analysis)"
+			}
+			msgText += "\n--- End G-code ---"
 		}
 
 		// If this is the first message, prepend the system prompt

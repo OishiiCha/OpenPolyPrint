@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen, FileCode, X } from 'lucide-react'
 import { usePrinters } from '../hooks/usePrinters'
+import { useGCodeFiles } from '../hooks/useGCodeFiles'
 
 interface ChatMessage {
   role: string
@@ -27,6 +28,7 @@ interface AIChatPaneProps {
 
 export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const { printers } = usePrinters()
+  const { files: gcodeFiles } = useGCodeFiles()
   const [conversation, setConversation] = useState<ChatConversation | null>(null)
   const [loading, setLoading] = useState(false)
   const [input, setInput] = useState('')
@@ -34,6 +36,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const [linkedPrinterId, setLinkedPrinterId] = useState<string>('')
   const [showPrinterSelect, setShowPrinterSelect] = useState(false)
   const [attachSnapshot, setAttachSnapshot] = useState(false)
+  const [selectedGcodeId, setSelectedGcodeId] = useState<string>('')
+  const [showGcodeSelect, setShowGcodeSelect] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Start a new conversation
@@ -64,13 +68,16 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   }, [conversation?.messages])
 
   const sendMessage = async () => {
-    if (!input.trim() || !conversation || loading) return
+    if ((!input.trim() && !attachSnapshot && !selectedGcodeId) || !conversation || loading) return
     if (attachSnapshot && !linkedPrinterId) {
       setError('Link a printer first to attach a snapshot')
       return
     }
     const msg = input.trim()
+    const gcodeId = selectedGcodeId
+    const gcodeFile = gcodeFiles.find((f) => f.id === gcodeId)
     setInput('')
+    setSelectedGcodeId('')
     setLoading(true)
     setError(null)
     try {
@@ -81,6 +88,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
           message: msg,
           attachSnapshot,
           printerId: linkedPrinterId,
+          gcodeFileId: gcodeId,
+          gcodeFileName: gcodeFile?.name || '',
         }),
       })
       if (!res.ok) {
@@ -287,8 +296,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
           {error && (
             <p className="mb-2 text-xs text-rose-500">{error}</p>
           )}
-          {/* Snapshot toggle */}
-          <div className="mb-2 flex items-center gap-2">
+          {/* Snapshot toggle + Gcode selector */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <button
               onClick={() => setAttachSnapshot(!attachSnapshot)}
               className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
@@ -299,17 +308,58 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
               title="Attach live camera frame + printer data"
             >
               <Camera className="h-3.5 w-3.5" />
-              {attachSnapshot ? 'Snapshot attached' : 'Attach snapshot'}
+              {attachSnapshot ? 'Snapshot on' : 'Snapshot'}
             </button>
             {attachSnapshot && linkedPrinter && (
               <span className="text-xs text-slate-400">
-                from {linkedPrinter.name}
+                {linkedPrinter.name}
               </span>
             )}
             {attachSnapshot && !linkedPrinterId && (
-              <span className="text-xs text-amber-500">Link a printer first</span>
+              <span className="text-xs text-amber-500">Link printer first</span>
+            )}
+            {/* Gcode file selector */}
+            <button
+              onClick={() => setShowGcodeSelect(!showGcodeSelect)}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                selectedGcodeId
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+              }`}
+              title="Attach a G-code file for analysis"
+            >
+              <FileCode className="h-3.5 w-3.5" />
+              G-code
+            </button>
+            {selectedGcodeId && (
+              <span className="flex items-center gap-1 text-xs text-slate-400">
+                {gcodeFiles.find((f) => f.id === selectedGcodeId)?.name || 'selected'}
+                <button onClick={() => setSelectedGcodeId('')} className="text-slate-400 hover:text-rose-500">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
             )}
           </div>
+          {/* Gcode file dropdown */}
+          {showGcodeSelect && (
+            <div className="mb-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+              {gcodeFiles.length === 0 ? (
+                <p className="px-2 py-1.5 text-xs text-slate-400">No G-code files uploaded</p>
+              ) : (
+                gcodeFiles.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => { setSelectedGcodeId(f.id); setShowGcodeSelect(false) }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <FileCode className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="truncate">{f.name}</span>
+                    {f.size && <span className="ml-auto shrink-0 text-slate-400">{f.size}</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               type="text"
@@ -322,7 +372,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
             />
             <button
               onClick={sendMessage}
-              disabled={loading || (!input.trim() && !attachSnapshot)}
+              disabled={loading || (!input.trim() && !attachSnapshot && !selectedGcodeId)}
               className="rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-500 disabled:opacity-50"
             >
               <Send className="h-4 w-4" />

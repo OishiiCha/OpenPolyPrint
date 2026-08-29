@@ -74,6 +74,7 @@ h4 {
 /* ═════════════════════════════════════════════════════════════════
    POLYGON THEME
    Colorful dark theme with hexagon-shaped cards and Nunito font.
+   High contrast: deep dark backgrounds, bright vivid text.
    Activated by adding `theme-polygon` class to <html>.
    ═════════════════════════════════════════════════════════════════ */
 
@@ -82,13 +83,13 @@ h4 {
 }
 
 .theme-polygon body {
-  background-color: #1a1625;
-  color: #e2d8f0;
+  background-color: #0f0d1a;
+  color: #f5f0ff;
   font-family: 'Nunito', system-ui, sans-serif;
   background-image:
-    radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.06) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.04) 0%, transparent 60%);
+    radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.10) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.06) 0%, transparent 60%);
 }
 
 .theme-polygon h1,
@@ -101,29 +102,29 @@ h4 {
 
 /* Sidebar */
 .theme-polygon aside {
-  background-color: #221d33 !important;
-  border-color: #3d3258 !important;
+  background-color: #15121f !important;
+  border-color: #5a4d7a !important;
 }
 
 .theme-polygon aside nav a {
-  color: #a99bc4 !important;
+  color: #d4c8e8 !important;
 }
 
 .theme-polygon aside nav a:hover {
-  background-color: #2d2645 !important;
+  background-color: #251f3a !important;
 }
 
 .theme-polygon aside nav a.bg-blue-600 {
-  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
+  background: linear-gradient(135deg, #a855f7, #ec4899) !important;
   color: #fff !important;
 }
 
 /* Hexagon-shaped cards — pronounced hexagonal clip-path */
 .theme-polygon .border-2.border-slate-300,
 .theme-polygon .border-2.border-slate-700 {
-  background-color: #2a2440 !important;
-  border: 2px solid #4a3d6b !important;
-  border-top: 4px solid #8b5cf6 !important;
+  background-color: #1c1730 !important;
+  border: 2px solid #6b5b8e !important;
+  border-top: 4px solid #a855f7 !important;
   clip-path: polygon(
     20px 0,
     calc(100% - 20px) 0,
@@ -134,7 +135,7 @@ h4 {
     0 calc(100% - 20px),
     0 20px
   );
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15) !important;
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.2) !important;
 }
 
 /* Hexagon corners for smaller cards */
@@ -151,139 +152,139 @@ h4 {
   );
 }
 
-/* Text colors — purple/pink/cyan palette */
+/* Text colors — bright, high contrast on dark */
 .theme-polygon .text-slate-900 {
-  color: #f0e9ff !important;
+  color: #ffffff !important;
 }
 .theme-polygon .text-slate-700 {
-  color: #c4b5d9 !important;
+  color: #e8def5 !important;
 }
 .theme-polygon .text-slate-600 {
-  color: #a99bc4 !important;
+  color: #c9b8e0 !important;
 }
 .theme-polygon .text-slate-500 {
-  color: #8b7da8 !important;
+  color: #a896c4 !important;
 }
 .theme-polygon .text-slate-400 {
-  color: #6b5f88 !important;
+  color: #8a7aa8 !important;
 }
 .theme-polygon .text-slate-300 {
-  color: #5a4f73 !important;
+  color: #6b5b8e !important;
 }
 
-/* Blue accent → purple/pink gradient accent */
+/* Blue accent → vivid purple/pink */
 .theme-polygon .text-blue-600,
 .theme-polygon .text-blue-400 {
-  color: #a78bfa !important;
+  color: #c084fc !important;
 }
 .theme-polygon .text-blue-500 {
-  color: #c4b5fd !important;
+  color: #d8b4fe !important;
 }
 .theme-polygon .text-blue-700 {
-  color: #8b5cf6 !important;
+  color: #a855f7 !important;
 }
 
-/* Backgrounds */
+/* Backgrounds — darker for contrast */
 .theme-polygon .bg-slate-100 {
-  background-color: #2d2645 !important;
-}
-.theme-polygon .bg-slate-200 {
-  background-color: #352d50 !important;
-}
-.theme-polygon .bg-slate-50 {
   background-color: #251f3a !important;
 }
+.theme-polygon .bg-slate-200 {
+  background-color: #2d2645 !important;
+}
+.theme-polygon .bg-slate-50 {
+  background-color: #1c1730 !important;
+}
 .theme-polygon .bg-white {
-  background-color: #2a2440 !important;
+  background-color: #1c1730 !important;
 }
 
-/* Blue backgrounds → purple */
+/* Blue backgrounds → vivid purple/pink gradient */
 .theme-polygon .bg-blue-600 {
-  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
+  background: linear-gradient(135deg, #a855f7, #ec4899) !important;
 }
 .theme-polygon .bg-blue-100 {
-  background-color: #3d3258 !important;
+  background-color: #3d3260 !important;
 }
 .theme-polygon .bg-blue-900\/30 {
-  background-color: rgba(139, 92, 246, 0.2) !important;
+  background-color: rgba(168, 85, 247, 0.25) !important;
 }
 
-/* Borders */
+/* Borders — brighter for definition */
 .theme-polygon .border-slate-200 {
-  border-color: #3d3258 !important;
+  border-color: #4a3d6b !important;
 }
 .theme-polygon .border-slate-300 {
-  border-color: #4a3d6b !important;
+  border-color: #6b5b8e !important;
 }
 .theme-polygon .border-slate-700,
 .theme-polygon .border-slate-800 {
-  border-color: #3d3258 !important;
+  border-color: #4a3d6b !important;
 }
 
-/* Blue border top → purple */
+/* Blue border top → vivid purple */
 .theme-polygon .border-t-blue-500 {
-  border-top-color: #8b5cf6 !important;
+  border-top-color: #a855f7 !important;
 }
 
 /* Buttons */
 .theme-polygon .bg-slate-100:hover {
-  background-color: #352d50 !important;
+  background-color: #2d2645 !important;
 }
 
 /* Scrollbar */
 .theme-polygon ::-webkit-scrollbar-thumb {
-  background-color: #4a3d6b !important;
+  background-color: #6b5b8e !important;
 }
 .theme-polygon ::-webkit-scrollbar-thumb:hover {
-  background-color: #5a4f73 !important;
+  background-color: #8a7aa8 !important;
 }
 
-/* Status badges — colorful but readable on dark */
+/* Status badges — vivid colors with stronger backgrounds */
 .theme-polygon .bg-emerald-100 {
-  background-color: rgba(16, 185, 129, 0.15) !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
 }
 .theme-polygon .text-emerald-700 {
-  color: #34d399 !important;
+  color: #6ee7b7 !important;
 }
 .theme-polygon .text-emerald-400 {
-  color: #34d399 !important;
+  color: #6ee7b7 !important;
 }
 .theme-polygon .bg-rose-100 {
-  background-color: rgba(244, 63, 94, 0.15) !important;
+  background-color: rgba(244, 63, 94, 0.2) !important;
 }
 .theme-polygon .text-rose-700 {
-  color: #fb7185 !important;
+  color: #fda4af !important;
 }
 .theme-polygon .text-rose-400 {
-  color: #fb7185 !important;
+  color: #fda4af !important;
 }
 .theme-polygon .bg-amber-100 {
-  background-color: rgba(251, 191, 36, 0.15) !important;
+  background-color: rgba(251, 191, 36, 0.2) !important;
 }
 .theme-polygon .text-amber-700 {
-  color: #fbbf24 !important;
+  color: #fcd34d !important;
 }
 .theme-polygon .text-amber-300 {
-  color: #fbbf24 !important;
+  color: #fcd34d !important;
 }
 
 /* Modal */
 .theme-polygon .bg-slate-950 {
-  background-color: #1a1625 !important;
+  background-color: #0f0d1a !important;
 }
 .theme-polygon .bg-slate-900 {
-  background-color: #221d33 !important;
+  background-color: #15121f !important;
 }
 .theme-polygon .bg-slate-800 {
-  background-color: #2d2645 !important;
+  background-color: #251f3a !important;
 }
 .theme-polygon .bg-slate-800\/50 {
-  background-color: rgba(45, 38, 69, 0.5) !important;
+  background-color: rgba(37, 31, 58, 0.6) !important;
 }
 
-/* Progress bars — gradient */
+/* Progress bars — vivid gradient */
 .theme-polygon .bg-blue-600.h-full {
-  background: linear-gradient(90deg, #8b5cf6, #ec4899) !important;
+  background: linear-gradient(90deg, #a855f7, #ec4899) !important;
 }
 
 /* Inputs */
@@ -291,17 +292,17 @@ h4 {
 .theme-polygon select,
 .theme-polygon textarea {
   font-family: 'Nunito', system-ui, sans-serif;
-  background-color: #221d33 !important;
-  border-color: #4a3d6b !important;
-  color: #e2d8f0 !important;
+  background-color: #15121f !important;
+  border-color: #6b5b8e !important;
+  color: #f5f0ff !important;
 }
 
-/* Focus ring → purple */
+/* Focus ring → vivid purple */
 .theme-polygon .focus\:ring-blue-500:focus {
-  --tw-ring-color: #8b5cf6 !important;
+  --tw-ring-color: #a855f7 !important;
 }
 
 /* Black/80 overlay for modals */
 .theme-polygon .bg-black\/80 {
-  background-color: rgba(10, 8, 20, 0.85) !important;
+  background-color: rgba(5, 3, 12, 0.88) !important;
 }
