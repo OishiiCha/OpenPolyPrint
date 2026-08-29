@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen, FileCode, X, ArrowLeft, Clock, Upload } from 'lucide-react'
 import { usePrinters } from '../hooks/usePrinters'
 import { useGCodeFiles } from '../hooks/useGCodeFiles'
+import { useCameras } from '../hooks/useCameras'
 import type { GCodeFile } from '../types'
 
 interface ChatMessage {
@@ -30,6 +31,7 @@ interface AIChatPaneProps {
 export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const { printers } = usePrinters()
   const { files: gcodeFiles, refresh: gcodeFilesRefresh } = useGCodeFiles()
+  const { cameras } = useCameras()
   const [conversation, setConversation] = useState<ChatConversation | null>(null)
   const [loading, setLoading] = useState(false)
   const [input, setInput] = useState('')
@@ -50,6 +52,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const [setupPrinterId, setSetupPrinterId] = useState<string>('')
   const [setupGcodeId, setSetupGcodeId] = useState<string>('')
   const [setupInitialMsg, setSetupInitialMsg] = useState('')
+  const [setupSnapshot, setSetupSnapshot] = useState(false)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -117,15 +120,19 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
       setLinkedPrinterId(setupPrinterId)
       setView('chat')
 
-      // If there's an initial message or gcode, send it immediately
-      if (setupInitialMsg.trim() || setupGcodeId) {
+      // If there's an initial message, gcode, or snapshot, send it immediately
+      if (setupInitialMsg.trim() || setupGcodeId || (setupSnapshot && setupPrinterId)) {
         const gcodeFile = gcodeFiles.find((f) => f.id === setupGcodeId)
+        let defaultMsg = 'Please analyze this.'
+        if (setupGcodeId && setupSnapshot) defaultMsg = 'Please analyze this G-code file and the live camera snapshot.'
+        else if (setupGcodeId) defaultMsg = 'Please analyze this G-code file.'
+        else if (setupSnapshot) defaultMsg = 'Please analyze this live camera snapshot from my printer.'
         const sendRes = await fetch(`/api/ai/chat/${data.id}/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: setupInitialMsg.trim() || 'Please analyze this G-code file.',
-            attachSnapshot: false,
+            message: setupInitialMsg.trim() || defaultMsg,
+            attachSnapshot: setupSnapshot,
             printerId: setupPrinterId,
             gcodeFileId: setupGcodeId,
             gcodeFileName: gcodeFile?.name || '',
@@ -139,6 +146,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
       }
       setSetupInitialMsg('')
       setSetupGcodeId('')
+      setSetupSnapshot(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start chat')
     } finally {
@@ -222,6 +230,14 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   }
 
   const linkedPrinter = printers.find((p) => p.id === linkedPrinterId)
+
+  // Setup view computed values
+  const setupPrinter = printers.find((p) => p.id === setupPrinterId)
+  const printerCameras = cameras.filter((c) => c.printerId === setupPrinterId && c.enabled)
+  const printerGcodeFiles = setupPrinterId
+    ? gcodeFiles.filter((f) => f.printerId === setupPrinterId)
+    : []
+  const allGcodeFiles = gcodeFiles
 
   // Collapsed state
   if (collapsed) {
@@ -384,7 +400,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
             </label>
             <select
               value={setupPrinterId}
-              onChange={(e) => setSetupPrinterId(e.target.value)}
+              onChange={(e) => { setSetupPrinterId(e.target.value); setSetupGcodeId('') }}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             >
               <option value="">No printer</option>
@@ -392,29 +408,63 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            {setupPrinterId && (
-              <p className="mt-1 text-[10px] text-slate-400">
-                You'll be able to attach live snapshots from this printer
-              </p>
-            )}
           </div>
 
-          {/* G-code file selection */}
+          {/* Snapshot toggle — only show when a printer is selected and has cameras */}
+          {setupPrinterId && (
+            <div>
+              <button
+                onClick={() => setSetupSnapshot(!setupSnapshot)}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                  setupSnapshot
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                }`}
+                title="Capture a live frame from this printer's cameras"
+              >
+                <Camera className="h-4 w-4" />
+                {setupSnapshot ? 'Snapshot will be attached' : 'Attach live camera snapshot'}
+              </button>
+              {setupSnapshot && (
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {printerCameras.length > 0
+                    ? `${printerCameras.length} camera(s) on this printer`
+                    : 'No cameras assigned to this printer'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* G-code file selection — filtered by printer if one is selected */}
           <div>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
               <FileCode className="h-3.5 w-3.5" /> Attach G-code file (optional)
             </label>
+            {setupPrinterId && printerGcodeFiles.length > 0 && (
+              <p className="mb-1.5 text-[10px] text-slate-400">
+                {printerGcodeFiles.length} file(s) on this printer · {allGcodeFiles.length} total
+              </p>
+            )}
             <div className="flex gap-2">
-              {gcodeFiles.length > 0 ? (
+              {allGcodeFiles.length > 0 ? (
                 <select
                   value={setupGcodeId}
                   onChange={(e) => setSetupGcodeId(e.target.value)}
                   className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 >
                   <option value="">No file</option>
-                  {gcodeFiles.map((f: GCodeFile) => (
-                    <option key={f.id} value={f.id}>{f.name} {f.size ? `(${f.size})` : ''}</option>
-                  ))}
+                  {setupPrinterId && printerGcodeFiles.length > 0 && (
+                    <optgroup label={`From ${setupPrinter?.name || 'printer'}`}>
+                      {printerGcodeFiles.map((f: GCodeFile) => (
+                        <option key={f.id} value={f.id}>{f.name} {f.size ? `(${f.size})` : ''}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="All files">
+                    {allGcodeFiles.map((f: GCodeFile) => (
+                      <option key={f.id} value={f.id}>{f.name} {f.size ? `(${f.size})` : ''}</option>
+                    ))}
+                  </optgroup>
                 </select>
               ) : (
                 <p className="flex-1 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-400 dark:border-slate-700">
