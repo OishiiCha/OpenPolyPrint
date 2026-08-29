@@ -100,6 +100,23 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
     }
   }
 
+  // Listen for "analyze gcode" requests from other components (e.g. G-code page)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { gcodeId?: string; gcodeName?: string; printerId?: string }
+      if (detail?.gcodeId) {
+        setSetupGcodeId(detail.gcodeId)
+        setSetupPrinterId(detail.printerId || '')
+        setSetupInitialMsg('Please analyze this G-code file.')
+        setView('setup')
+        // Expand the sidebar if collapsed
+        if (collapsed) onToggle()
+      }
+    }
+    window.addEventListener('openpolyprint-analyze-gcode', handler)
+    return () => window.removeEventListener('openpolyprint-analyze-gcode', handler)
+  }, [collapsed, onToggle])
+
   // Start a new conversation from setup
   const startNewChat = async () => {
     setError(null)

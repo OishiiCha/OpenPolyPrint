@@ -27,6 +27,7 @@ import {
   Search,
   Settings as SettingsIcon,
   SlidersHorizontal,
+  Sparkles,
   Square,
   Thermometer,
   Timer,
@@ -1284,6 +1285,11 @@ export function PrinterDetail() {
 }
 
 function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) => void }) {
+  const analyzeFile = () => {
+    window.dispatchEvent(new CustomEvent('openpolyprint-analyze-gcode', {
+      detail: { gcodeId: file.id, gcodeName: file.name, printerId: file.printerId }
+    }))
+  }
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
 
@@ -1336,7 +1342,17 @@ function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) =
           <MoreVertical className="h-4 w-4" />
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-full z-10 mt-1 w-32 rounded-none border border-slate-700 bg-slate-950 shadow-xl">
+          <div className="absolute right-0 top-full z-10 mt-1 w-36 rounded-none border border-slate-700 bg-slate-950 shadow-xl">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false)
+                analyzeFile()
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 font-mono text-sm text-blue-400 hover:bg-slate-900"
+            >
+              <Sparkles className="h-4 w-4" /> Analyze
+            </button>
             <button
               type="button"
               onClick={() => {
