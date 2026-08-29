@@ -219,7 +219,6 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this conversation?')) return
     await fetch(`/api/ai/chat/${id}/delete`, { method: 'DELETE' })
     if (conversation?.id === id) {
       setConversation(null)

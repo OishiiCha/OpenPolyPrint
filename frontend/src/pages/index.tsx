@@ -65,6 +65,13 @@ const resultColor: Record<string, string> = {
   Cancelled: 'text-amber-600 dark:text-amber-400',
 }
 
+// cameraAspectClass returns the CSS aspect ratio class for a camera based on
+// its type. Pi cameras (mipi) use 4:3 sensors; USB cameras typically use 16:9.
+function cameraAspectClass(camera?: Camera): string {
+  if (!camera) return 'aspect-video'
+  return camera.type === 'mipi' ? 'aspect-[4/3]' : 'aspect-video'
+}
+
 export function SectionTitle({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <div className="mb-4 flex items-center justify-between">
@@ -312,7 +319,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
             <img
               src={camera.url}
               alt={camera.name}
-              className="aspect-video w-full object-cover"
+              className={`${cameraAspectClass(camera)} w-full object-cover`}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
           </div>
@@ -512,7 +519,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                           <img
                             src={cam.url}
                             alt={cam.name}
-                            className="aspect-video w-full object-cover bg-black"
+                            className={`${cameraAspectClass(cam)} w-full object-cover bg-black`}
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                           />
                         ) : (
@@ -998,7 +1005,7 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
               <img
                 src={liveCamera.url}
                 alt={liveCamera.name}
-                className="aspect-video w-full object-cover"
+                className={`${cameraAspectClass(liveCamera)} w-full object-cover`}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
@@ -1670,7 +1677,7 @@ function CameraCard({
         <button
           type="button"
           onClick={() => camera.url && camera.enabled && setExpanded(true)}
-          className={`relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-800 ${camera.url && camera.enabled ? 'cursor-zoom-in hover:ring-2 hover:ring-blue-500' : 'cursor-default'}`}
+          className={`relative flex ${cameraAspectClass(camera)} w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400 dark:bg-slate-800 ${camera.url && camera.enabled ? 'cursor-zoom-in hover:ring-2 hover:ring-blue-500' : 'cursor-default'}`}
           title={camera.url && camera.enabled ? 'Click to expand' : undefined}
         >
           {camera.url && camera.enabled ? (
@@ -2196,7 +2203,7 @@ function CameraModal({
                   <img
                     src={previewUrl}
                     alt="camera preview"
-                    className="aspect-video w-full rounded bg-slate-950 object-cover"
+                    className={`${type === 'mipi' ? 'aspect-[4/3]' : 'aspect-video'} w-full rounded bg-slate-950 object-cover`}
                     onLoad={() => setPreviewError(false)}
                     onError={() => setPreviewError(true)}
                   />
