@@ -12,8 +12,8 @@ import (
 
 // ChatMessageForAPI is the format Gemini expects for each content part.
 type ChatMessageForAPI struct {
-	Role  string      `json:"role"`  // "user" or "model"
-	Parts []ChatPart  `json:"parts"`
+	Role  string     `json:"role"` // "user" or "model"
+	Parts []ChatPart `json:"parts"`
 }
 
 // ChatPart is either text or an inline image.
@@ -27,8 +27,8 @@ type ChatPart struct {
 
 // ChatRequest is the full request to start or continue a chat.
 type ChatRequest struct {
-	APIKey    string             `json:"apiKey"`
-	Messages  []ChatMessageForAPI `json:"messages"`
+	APIKey   string              `json:"apiKey"`
+	Messages []ChatMessageForAPI `json:"messages"`
 }
 
 // ChatResponse is the result from Gemini.
@@ -72,7 +72,7 @@ func Chat(req ChatRequest) (*ChatResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + req.APIKey
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + req.APIKey
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
 	if err != nil {

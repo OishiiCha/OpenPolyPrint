@@ -62,7 +62,7 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 	// Encode image as base64
 	imgBase64 := base64.StdEncoding.EncodeToString(frameData)
 
-	// Build Gemini API request (using gemini-2.0-flash for multimodal with good speed)
+	// Build Gemini API request (using gemini-2.5-flash for multimodal with good speed)
 	type part struct {
 		Text       string `json:"text,omitempty"`
 		InlineData struct {
@@ -112,8 +112,8 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Use gemini-2.0-flash for multimodal analysis
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + req.APIKey
+	// Use gemini-2.5-flash for multimodal analysis
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + req.APIKey
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
 	if err != nil {

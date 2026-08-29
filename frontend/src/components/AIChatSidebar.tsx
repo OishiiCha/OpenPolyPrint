@@ -84,8 +84,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
         }),
       })
       if (!res.ok) {
-        const d = await res.json().catch(() => ({ error: 'Failed to send' }))
-        throw new Error(d.error || 'Failed to send')
+        const d = await res.json().catch(() => ({ error: `Failed (HTTP ${res.status})` }))
+        throw new Error(d.error || `Failed (HTTP ${res.status})`)
       }
       const updated = await res.json() as ChatConversation
       if (!updated.messages) updated.messages = []
