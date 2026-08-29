@@ -3759,15 +3759,29 @@ export function Settings() {
         <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Appearance</h3>
           <div className="space-y-4">
-            <label className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
-              Use dark theme
-              <input
-                type="checkbox"
-                checked={config.dark}
-                onChange={(e) => update({ dark: e.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
-              />
-            </label>
+            <div>
+              <p className="mb-2 text-sm text-slate-700 dark:text-slate-300">Theme</p>
+              <div className="flex gap-2">
+                {([
+                  { value: 'light', label: 'Light', desc: 'Default light' },
+                  { value: 'dark', label: 'Dark', desc: 'Dark mode' },
+                  { value: 'honeycomb', label: 'Honeycomb', desc: 'Warm amber' },
+                ] as const).map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => update({ theme: t.value, dark: t.value === 'dark' })}
+                    className={`flex flex-col items-center gap-1 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-colors ${
+                      config.theme === t.value
+                        ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">{t.label}</span>
+                    <span className="text-[10px] text-slate-400">{t.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="flex items-center justify-between text-sm text-slate-700 dark:text-slate-300">
               Compact mode
               <input

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -68,4 +69,222 @@ h4 {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   HONEYCOMB THEME
+   Warm amber/honey palette with beveled card corners and Nunito font.
+   Activated by adding `theme-honeycomb` class to <html>.
+   ═════════════════════════════════════════════════════════════════ */
+
+.theme-honeycomb {
+  /* Override color scheme */
+  color-scheme: light;
+}
+
+.theme-honeycomb body {
+  background-color: #fef9ef;
+  color: #5c4400;
+  font-family: 'Nunito', system-ui, sans-serif;
+}
+
+.theme-honeycomb h1,
+.theme-honeycomb h2,
+.theme-honeycomb h3,
+.theme-honeycomb h4 {
+  font-family: 'Nunito', system-ui, sans-serif;
+  font-weight: 700;
+}
+
+/* Honeycomb background pattern — subtle hexagonal pattern */
+.theme-honeycomb body {
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(217, 158, 36, 0.04) 2px, transparent 3px);
+  background-size: 28px 28px;
+}
+
+/* Sidebar */
+.theme-honeycomb .theme-honeycomb-sidebar,
+.theme-honeycomb aside {
+  background-color: #fff5d6 !important;
+  border-color: #e8c878 !important;
+}
+
+.theme-honeycomb aside a span,
+.theme-honeycomb aside nav a {
+  color: #8b6914 !important;
+}
+
+.theme-honeycomb aside nav a:hover {
+  background-color: #f0d990 !important;
+}
+
+.theme-honeycomb aside nav a.bg-blue-600 {
+  background-color: #d99f24 !important;
+  color: #fff !important;
+}
+
+/* Cards — beveled corners using clip-path */
+.theme-honeycomb .border-2.border-slate-300,
+.theme-honeycomb .border-2.border-slate-700 {
+  background-color: #fffbeb !important;
+  border-color: #e8c878 !important;
+  clip-path: polygon(
+    12px 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% calc(100% - 12px),
+    calc(100% - 12px) 100%,
+    12px 100%,
+    0 calc(100% - 12px),
+    0 12px
+  );
+  box-shadow: 0 2px 8px rgba(217, 158, 36, 0.15) !important;
+}
+
+/* Beveled corners for smaller cards (rounded-xl elements) */
+.theme-honeycomb .rounded-xl.border {
+  clip-path: polygon(
+    8px 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% calc(100% - 8px),
+    calc(100% - 8px) 100%,
+    8px 100%,
+    0 calc(100% - 8px),
+    0 8px
+  );
+}
+
+/* Text colors */
+.theme-honeycomb .text-slate-900 {
+  color: #5c4400 !important;
+}
+.theme-honeycomb .text-slate-700 {
+  color: #7a5c1a !important;
+}
+.theme-honeycomb .text-slate-600 {
+  color: #8b6914 !important;
+}
+.theme-honeycomb .text-slate-500 {
+  color: #a08530 !important;
+}
+.theme-honeycomb .text-slate-400 {
+  color: #b89952 !important;
+}
+.theme-honeycomb .text-slate-300 {
+  color: #c9ab66 !important;
+}
+
+/* Blue accent → amber accent */
+.theme-honeycomb .text-blue-600,
+.theme-honeycomb .text-blue-400 {
+  color: #d99f24 !important;
+}
+.theme-honeycomb .text-blue-500 {
+  color: #e8a820 !important;
+}
+.theme-honeycomb .text-blue-700 {
+  color: #b87d10 !important;
+}
+
+/* Backgrounds */
+.theme-honeycomb .bg-slate-100 {
+  background-color: #f5e6c0 !important;
+}
+.theme-honeycomb .bg-slate-200 {
+  background-color: #efd9a0 !important;
+}
+.theme-honeycomb .bg-slate-50 {
+  background-color: #faf0d8 !important;
+}
+.theme-honeycomb .bg-white {
+  background-color: #fffbeb !important;
+}
+
+/* Blue backgrounds → amber */
+.theme-honeycomb .bg-blue-600 {
+  background-color: #d99f24 !important;
+}
+.theme-honeycomb .bg-blue-100 {
+  background-color: #fde8b0 !important;
+}
+.theme-honeycomb .bg-blue-900\/30 {
+  background-color: rgba(217, 158, 36, 0.2) !important;
+}
+
+/* Borders */
+.theme-honeycomb .border-slate-200 {
+  border-color: #e8c878 !important;
+}
+.theme-honeycomb .border-slate-300 {
+  border-color: #d9b25e !important;
+}
+.theme-honeycomb .border-slate-700,
+.theme-honeycomb .border-slate-800 {
+  border-color: #c9a84a !important;
+}
+
+/* Blue border top → amber */
+.theme-honeycomb .border-t-blue-500 {
+  border-top-color: #d99f24 !important;
+}
+
+/* Buttons */
+.theme-honeycomb .bg-slate-100:hover {
+  background-color: #efd9a0 !important;
+}
+
+/* Scrollbar */
+.theme-honeycomb ::-webkit-scrollbar-thumb {
+  background-color: #d9b25e !important;
+}
+.theme-honeycomb ::-webkit-scrollbar-thumb:hover {
+  background-color: #c9a240 !important;
+}
+
+/* Status badges — keep semantic colors but warmer */
+.theme-honeycomb .bg-emerald-100 {
+  background-color: #d4f0d0 !important;
+}
+.theme-honeycomb .text-emerald-700 {
+  color: #4a7a3a !important;
+}
+.theme-honeycomb .bg-rose-100 {
+  background-color: #f8d8d0 !important;
+}
+.theme-honeycomb .text-rose-700 {
+  color: #b54a3a !important;
+}
+.theme-honeycomb .bg-amber-100 {
+  background-color: #fde8b0 !important;
+}
+.theme-honeycomb .text-amber-700 {
+  color: #8b6914 !important;
+}
+
+/* Modal */
+.theme-honeycomb .bg-slate-950 {
+  background-color: #fffbeb !important;
+}
+.theme-honeycomb .bg-slate-900 {
+  background-color: #fff5d6 !important;
+}
+.theme-honeycomb .bg-slate-800 {
+  background-color: #f5e6c0 !important;
+}
+.theme-honeycomb .bg-slate-800\/50 {
+  background-color: rgba(245, 230, 192, 0.5) !important;
+}
+
+/* Progress bars */
+.theme-honeycomb .bg-blue-600.h-full {
+  background-color: #d99f24 !important;
+}
+
+/* Inputs */
+.theme-honeycomb input,
+.theme-honeycomb select,
+.theme-honeycomb textarea {
+  font-family: 'Nunito', system-ui, sans-serif;
 }

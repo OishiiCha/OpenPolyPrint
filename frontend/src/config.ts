@@ -15,8 +15,11 @@ import { integrations } from './integrations'
 
 import type { AutoRecordSettings, TimelapseSettings } from './types'
 
+export type Theme = 'light' | 'dark' | 'honeycomb'
+
 export interface AppConfig {
   dark: boolean
+  theme: Theme
   compact: boolean
   showMiniTerminal: boolean
   slicerTarget: string
@@ -65,6 +68,7 @@ const defaultAutoRecord = (): AutoRecordSettings => ({
 export function defaultConfig(): AppConfig {
   return {
     dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
     compact: false,
     showMiniTerminal: false,
     slicerTarget: '',
