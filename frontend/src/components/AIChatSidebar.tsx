@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare } from 'lucide-react'
-import type { Printer } from '../types'
+import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { usePrinters } from '../hooks/usePrinters'
 
 interface ChatMessage {
   role: string
@@ -21,10 +21,12 @@ interface ChatConversation {
 }
 
 interface AIChatPaneProps {
-  printers: Printer[]
+  collapsed: boolean
+  onToggle: () => void
 }
 
-export function AIChatPane({ printers }: AIChatPaneProps) {
+export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
+  const { printers } = usePrinters()
   const [conversation, setConversation] = useState<ChatConversation | null>(null)
   const [loading, setLoading] = useState(false)
   const [input, setInput] = useState('')
@@ -47,6 +49,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
       })
       if (!res.ok) throw new Error('Failed to start chat')
       const data = await res.json() as ChatConversation
+      if (!data.messages) data.messages = []
       setConversation(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start chat')
@@ -85,6 +88,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
         throw new Error(d.error || 'Failed to send')
       }
       const updated = await res.json() as ChatConversation
+      if (!updated.messages) updated.messages = []
       setConversation(updated)
       setAttachSnapshot(false) // reset after sending
     } catch (e) {
@@ -103,22 +107,41 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
 
   const linkedPrinter = printers.find((p) => p.id === linkedPrinterId)
 
+  // Collapsed state: show a thin bar with expand button
+  if (collapsed) {
+    return (
+      <aside className="flex w-12 flex-col items-center border-l border-slate-300 bg-slate-100 py-4 dark:border-slate-700 dark:bg-slate-950">
+        <button
+          onClick={onToggle}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800"
+          title="Open AI Chat"
+        >
+          <PanelRightOpen className="h-5 w-5" />
+        </button>
+        <div className="mt-4 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 p-1.5">
+          <Sparkles className="h-4 w-4 text-white" />
+        </div>
+        <span className="mt-2 font-mono text-[9px] text-slate-400 [writing-mode:vertical-rl]">AI Chat</span>
+      </aside>
+    )
+  }
+
   return (
-    <div className="flex flex-col rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+    <aside className="flex w-80 flex-col border-l border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
+      <div className="flex items-center justify-between border-b border-slate-200 p-3 dark:border-slate-800">
         <div className="flex items-center gap-2">
           <div className="rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 p-1.5">
             <Sparkles className="h-4 w-4 text-white" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">AI Print Assistant</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">AI Assistant</h2>
             <p className="text-xs text-slate-400">
-              {conversation ? `${conversation.messages.length} messages` : 'No active chat'}
+              {conversation ? `${conversation.messages?.length ?? 0} messages` : 'No active chat'}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {conversation && (
             <>
               <button
@@ -130,13 +153,20 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
               </button>
               <button
                 onClick={startNewChat}
-                className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                 title="New chat"
               >
-                <Plus className="h-3.5 w-3.5" /> New
+                <Plus className="h-3.5 w-3.5" />
               </button>
             </>
           )}
+          <button
+            onClick={onToggle}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            title="Collapse"
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -179,7 +209,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: '300px', maxHeight: '500px' }}>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {!conversation && !loading && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <MessageSquare className="h-10 w-10 text-slate-300 dark:text-slate-700" />
@@ -300,7 +330,7 @@ export function AIChatPane({ printers }: AIChatPaneProps) {
           </div>
         </div>
       )}
-    </div>
+    </aside>
   )
 }
 

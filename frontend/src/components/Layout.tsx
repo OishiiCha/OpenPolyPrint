@@ -21,6 +21,7 @@ import {
   Gauge,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
+import { AIChatPane } from './AIChatSidebar'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -117,6 +118,15 @@ export function Layout() {
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
   const [geminiEnabled, setGeminiEnabled] = useState(() => loadConfig().geminiEnabled)
   const [analyticsEnabled, setAnalyticsEnabled] = useState(() => loadConfig().analyticsEnabled)
+  const [chatCollapsed, setChatCollapsed] = useState(() => {
+    try { return localStorage.getItem('aiChatCollapsed') === 'true' } catch { return false }
+  })
+
+  const toggleChat = () => {
+    const next = !chatCollapsed
+    setChatCollapsed(next)
+    try { localStorage.setItem('aiChatCollapsed', String(next)) } catch {}
+  }
 
   useEffect(() => {
     if (isDark) {
@@ -187,11 +197,15 @@ export function Layout() {
         </div>
       </aside>
 
-      <div className="flex flex-1 flex-col bg-white dark:bg-slate-950">
+      <div className="flex flex-1 flex-col overflow-hidden bg-white dark:bg-slate-950">
         <main className="flex-1 overflow-y-auto p-8">
           <Outlet />
         </main>
       </div>
+
+      {geminiEnabled && (
+        <AIChatPane collapsed={chatCollapsed} onToggle={toggleChat} />
+      )}
     </div>
   )
 }
