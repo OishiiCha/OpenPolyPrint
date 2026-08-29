@@ -3794,50 +3794,6 @@ export function Settings() {
           </div>
         </Card>
         <Card>
-          <h3 className="mb-2 font-semibold text-slate-900 dark:text-white">HTTPS / TLS Certificate</h3>
-          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            The server auto-installs its CA certificate on the host it runs on.
-            For other devices on your network, download and run the installer
-            for your platform to trust the HTTPS certificate.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <a
-              href="/api/tls/install/windows"
-              download="install-openpolyprint-ca.bat"
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
-            >
-              Windows installer (.bat)
-            </a>
-            <a
-              href="/api/tls/install/mac"
-              download="install-openpolyprint-ca.sh"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
-            >
-              macOS installer (.sh)
-            </a>
-            <a
-              href="/api/tls/install/linux"
-              download="install-openpolyprint-ca.sh"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-600"
-            >
-              Linux installer (.sh)
-            </a>
-            <a
-              href="/api/tls/ca"
-              download="openpolyprint-ca.pem"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              CA cert only (.pem)
-            </a>
-          </div>
-          <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
-            <p><strong>Windows:</strong> Download and double-click the .bat file — it will install the CA and prompt for admin if needed</p>
-            <p><strong>macOS:</strong> Download the .sh file, run <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod +x install-openpolyprint-ca.sh && ./install-openpolyprint-ca.sh</code></p>
-            <p><strong>Linux:</strong> Download the .sh file, run <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">chmod +x install-openpolyprint-ca.sh && sudo ./install-openpolyprint-ca.sh</code></p>
-            <p>After installing, restart your browser for the change to take effect.</p>
-          </div>
-        </Card>
-        <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the OctoPrint API,
