@@ -78,6 +78,9 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		GenerationConfig struct {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
+			ThinkingConfig  struct {
+				ThinkingBudget int `json:"thinkingBudget"`
+			} `json:"thinkingConfig"`
 		} `json:"generationConfig"`
 	}
 
@@ -101,9 +104,17 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		GenerationConfig: struct {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
+			ThinkingConfig  struct {
+				ThinkingBudget int `json:"thinkingBudget"`
+			} `json:"thinkingConfig"`
 		}{
 			Temperature:     0.4,
-			MaxOutputTokens: 2048,
+			MaxOutputTokens: 8192,
+			ThinkingConfig: struct {
+				ThinkingBudget int `json:"thinkingBudget"`
+			}{
+				ThinkingBudget: 0,
+			},
 		},
 	}
 
@@ -142,7 +153,8 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text    string `json:"text"`
+					Thought bool   `json:"thought,omitempty"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -151,10 +163,16 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	var text string
-	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
-		text = geminiResp.Candidates[0].Content.Parts[0].Text
+	// Collect all non-thought text parts
+	var textParts []string
+	if len(geminiResp.Candidates) > 0 {
+		for _, part := range geminiResp.Candidates[0].Content.Parts {
+			if part.Text != "" && !part.Thought {
+				textParts = append(textParts, part.Text)
+			}
+		}
 	}
+	text := strings.Join(textParts, "\n")
 
 	return &AnalysisResponse{
 		Analysis: text,

@@ -1258,12 +1258,14 @@ func main() {
 		result, err := ai.Chat(chatReq)
 		if err != nil {
 			log.Printf("[ai] chat send failed: %v", err)
+			errMsg := err.Error()
 			_ = chatStore.AddMessage(convID, ai.ChatMessage{
 				Role:      "model",
-				Text:      fmt.Sprintf("Error: %s", err.Error()),
+				Text:      fmt.Sprintf("Error: %s", errMsg),
 				Timestamp: time.Now(),
 			})
-			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			errJSON, _ := json.Marshal(map[string]string{"error": errMsg})
+			http.Error(w, string(errJSON), http.StatusInternalServerError)
 			return
 		}
 
