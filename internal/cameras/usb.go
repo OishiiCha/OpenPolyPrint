@@ -99,7 +99,7 @@ func (u *UsbCameraStreamer) Stop() {
 // If a frame has already been received, it is sent immediately so the
 // subscriber sees an image without waiting for the next ffmpeg frame.
 func (u *UsbCameraStreamer) Subscribe() chan []byte {
-	sub := make(chan []byte, 1)
+	sub := make(chan []byte, 4)
 	u.mu.Lock()
 	u.subscribers = append(u.subscribers, sub)
 	last := u.lastFrame
@@ -249,7 +249,7 @@ func (u *UsbCameraStreamer) runRpiCam() error {
 		"--codec", "mjpeg",
 		"--width", "640",
 		"--height", "480",
-		"--framerate", "24",
+		"--framerate", "30",
 	}
 	// Explicit camera index (from deviceId) or sensor name. The tools
 	// only accept a numeric camera index for --camera, so resolve a sensor
@@ -292,14 +292,13 @@ func (u *UsbCameraStreamer) runRpiCam() error {
 	u.dbgf("rpicam-vid failed (%v), trying ffmpeg v4l2 fallback", err)
 	v4l2Args := []string{
 		"-f", "v4l2",
-		"-framerate", "24",
+		"-framerate", "30",
 		"-video_size", "640x480",
 		"-input_format", "mjpeg",
 		"-i", "/dev/video0",
 		"-fflags", "nobuffer",
-		"-flags", "low_delay",
 		"-c:v", "mjpeg",
-		"-q:v", "3",
+		"-q:v", "5",
 		"-f", "mjpeg",
 		"-",
 	}
@@ -553,9 +552,8 @@ func (u *UsbCameraStreamer) buildMinimalStreamArgs() []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		return append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
@@ -571,9 +569,8 @@ func (u *UsbCameraStreamer) buildMinimalStreamArgs() []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		return append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
@@ -589,9 +586,8 @@ func (u *UsbCameraStreamer) buildMinimalStreamArgs() []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		return append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
@@ -606,7 +602,7 @@ func (u *UsbCameraStreamer) buildMinimalStreamArgs() []string {
 
 func (u *UsbCameraStreamer) buildStreamArgsInternal(alt bool) []string {
 	cam := &u.config
-	fps := 24 // streaming fps for live view
+	fps := 30 // streaming fps for live view
 
 	switch runtime.GOOS {
 	case "windows":
@@ -638,9 +634,8 @@ func (u *UsbCameraStreamer) buildStreamArgsInternal(alt bool) []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		args = append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
@@ -663,9 +658,8 @@ func (u *UsbCameraStreamer) buildStreamArgsInternal(alt bool) []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		args = append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
@@ -688,9 +682,8 @@ func (u *UsbCameraStreamer) buildStreamArgsInternal(alt bool) []string {
 		args = appendVFOpt(args, u.ffmpegVFFilters())
 		args = append(args,
 			"-fflags", "nobuffer",
-			"-flags", "low_delay",
 			"-c:v", "mjpeg",
-			"-q:v", "3",
+			"-q:v", "5",
 			"-f", "mjpeg",
 			"-",
 		)
