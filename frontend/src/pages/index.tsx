@@ -5,6 +5,7 @@ import { loadConfig, loadConfigWithEnv, saveConfig, type AppConfig, type Provide
 import { Switch } from '../components/Switch'
 import { BedPreview } from '../components/BedPreview'
 import { GCodePreview } from '../components/GCodePreview'
+import { CameraStream } from '../components/CameraStream'
 import { TempChart } from '../components/TempChart'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import {
@@ -319,11 +320,10 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
 
         {camera && camera.url && camera.enabled && (
           <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-            <img
+            <CameraStream
               src={camera.url}
               alt={camera.name}
               className={`${cameraAspectClass(camera)} w-full object-cover`}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
           </div>
         )}
@@ -519,11 +519,10 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                           <span className="text-[10px] text-slate-500 capitalize">{cam.type}</span>
                         </div>
                         {cam.url ? (
-                          <img
+                          <CameraStream
                             src={cam.url}
                             alt={cam.name}
                             className={`${cameraAspectClass(cam)} w-full object-cover bg-black`}
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                           />
                         ) : (
                           <div className="flex aspect-video items-center justify-center bg-slate-800 text-sm text-slate-500">
@@ -1034,15 +1033,14 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
           </div>
         </Card>
 
-        {liveCamera && (
+        {liveCamera && liveCamera.url && (
           <Card className="md:row-span-2">
             <h3 className="mb-4 font-mono font-semibold text-blue-400">[ live_camera ]</h3>
             <div className="overflow-hidden rounded-xl border border-slate-700">
-              <img
+              <CameraStream
                 src={liveCamera.url}
                 alt={liveCamera.name}
                 className={`${cameraAspectClass(liveCamera)} w-full object-cover`}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
             <p className="mt-2 font-mono text-xs text-slate-400">{liveCamera.name}</p>
@@ -1732,11 +1730,10 @@ function CameraCard({
           title={camera.url && camera.enabled ? 'Click to expand' : undefined}
         >
           {camera.url && camera.enabled ? (
-            <img
+            <CameraStream
               src={camera.url}
               alt={camera.name}
               className="h-full w-full object-cover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
           ) : (
             <Video className="h-8 w-8" />
@@ -1974,11 +1971,10 @@ function CameraCard({
               </button>
             </div>
             <div className="flex items-center justify-center bg-black p-2">
-              <img
+              <CameraStream
                 src={camera.url}
                 alt={camera.name}
                 className="max-h-[85vh] w-full object-contain"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
               />
             </div>
           </div>
@@ -2251,11 +2247,10 @@ function CameraModal({
               <label className="mb-2 block font-mono text-xs text-slate-400">Preview</label>
               {previewUrl ? (
                 <>
-                  <img
+                  <CameraStream
                     src={previewUrl}
                     alt="camera preview"
                     className={`${type === 'mipi' ? 'aspect-[4/3]' : 'aspect-video'} w-full rounded bg-slate-950 object-cover`}
-                    onLoad={() => setPreviewError(false)}
                     onError={() => setPreviewError(true)}
                   />
                   {previewError && (
