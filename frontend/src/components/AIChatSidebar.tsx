@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen, FileCode, X, ArrowLeft, Clock } from 'lucide-react'
+import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen, FileCode, X, ArrowLeft, Clock, Upload } from 'lucide-react'
 import { usePrinters } from '../hooks/usePrinters'
 import { useGCodeFiles } from '../hooks/useGCodeFiles'
 import type { GCodeFile } from '../types'
@@ -29,7 +29,7 @@ interface AIChatPaneProps {
 
 export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const { printers } = usePrinters()
-  const { files: gcodeFiles } = useGCodeFiles()
+  const { files: gcodeFiles, refresh: gcodeFilesRefresh } = useGCodeFiles()
   const [conversation, setConversation] = useState<ChatConversation | null>(null)
   const [loading, setLoading] = useState(false)
   const [input, setInput] = useState('')
@@ -50,6 +50,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const [setupPrinterId, setSetupPrinterId] = useState<string>('')
   const [setupGcodeId, setSetupGcodeId] = useState<string>('')
   const [setupInitialMsg, setSetupInitialMsg] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadHistory = async () => {
     setHistoryLoading(true)
@@ -68,6 +70,31 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   useEffect(() => {
     if (view === 'list') loadHistory()
   }, [view])
+
+  // Upload a gcode file
+  const uploadGcode = async (file: File) => {
+    setUploading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('printer_id', setupPrinterId)
+      const res = await fetch('/api/gcode', { method: 'POST', body: formData })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'Upload failed' }))
+        throw new Error(d.error || 'Upload failed')
+      }
+      const saved = await res.json() as GCodeFile
+      // Refresh gcode file list
+      await gcodeFilesRefresh()
+      // Auto-select the newly uploaded file
+      if (saved?.id) setSetupGcodeId(saved.id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   // Start a new conversation from setup
   const startNewChat = async () => {
@@ -377,22 +404,44 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
               <FileCode className="h-3.5 w-3.5" /> Attach G-code file (optional)
             </label>
-            {gcodeFiles.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-400 dark:border-slate-700">
-                No G-code files uploaded yet
-              </p>
-            ) : (
-              <select
-                value={setupGcodeId}
-                onChange={(e) => setSetupGcodeId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            <div className="flex gap-2">
+              {gcodeFiles.length > 0 ? (
+                <select
+                  value={setupGcodeId}
+                  onChange={(e) => setSetupGcodeId(e.target.value)}
+                  className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                >
+                  <option value="">No file</option>
+                  {gcodeFiles.map((f: GCodeFile) => (
+                    <option key={f.id} value={f.id}>{f.name} {f.size ? `(${f.size})` : ''}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="flex-1 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-400 dark:border-slate-700">
+                  No files yet — upload one
+                </p>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".gcode,.g,.gc,.nc,.ngc"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadGcode(f)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 disabled:opacity-50"
+                title="Upload a G-code file"
               >
-                <option value="">No file</option>
-                {gcodeFiles.map((f: GCodeFile) => (
-                  <option key={f.id} value={f.id}>{f.name} {f.size ? `(${f.size})` : ''}</option>
-                ))}
-              </select>
-            )}
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Upload
+              </button>
+            </div>
           </div>
 
           {/* Initial message */}
