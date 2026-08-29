@@ -1,16 +1,13 @@
 package ai
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // AnalysisRequest contains all the data for an AI analysis of a print frame.
@@ -126,16 +123,9 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 	// Use gemini-3.6-flash for multimodal analysis
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + req.APIKey
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
+	resp, err := doGeminiRequest(url, bodyJSON)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("gemini request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 

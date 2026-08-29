@@ -2,14 +2,85 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// geminiHTTPClient is a shared HTTP client configured for Gemini API calls.
+// It forces IPv4 to avoid IPv6 connection reset issues, and has a generous
+// timeout for large requests (gcode + images).
+var geminiHTTPClient = &http.Client{
+	Timeout: 120 * time.Second,
+	Transport: &http.Transport{
+		// Force IPv4 — IPv6 connectivity to Google APIs can be unreliable
+		// on some networks, causing "connection reset by peer" errors.
+		DialContext:           dialContextIPv4,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
+
+// dialContextIPv4 is a DialContext that only uses IPv4, avoiding IPv6
+// connection reset issues on networks with broken IPv6 routing.
+func dialContextIPv4(ctx context.Context, network, addr string) (net.Conn, error) {
+	d := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	return d.DialContext(ctx, "tcp4", addr)
+}
+
+// doGeminiRequest sends the request to Gemini with retry logic for transient
+// network errors (connection reset, EOF, timeout).
+func doGeminiRequest(url string, bodyJSON []byte) (*http.Response, error) {
+	maxRetries := 3
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+		httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := geminiHTTPClient.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			// Retry on network errors (connection reset, EOF, timeout, etc.)
+			if isTransientError(err) {
+				continue
+			}
+			return nil, fmt.Errorf("gemini request: %w", err)
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("gemini request (after %d retries): %w", maxRetries, lastErr)
+}
+
+// isTransientError reports whether the error is likely a transient network
+// issue worth retrying (connection reset, broken pipe, EOF, timeout).
+func isTransientError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "EOF") ||
+		strings.Contains(s, "timeout") ||
+		strings.Contains(s, "no route to host") ||
+		strings.Contains(s, "network is unreachable") ||
+		strings.Contains(s, "temporarily unavailable")
+}
 
 // ChatMessageForAPI is the format Gemini expects for each content part.
 type ChatMessageForAPI struct {
@@ -86,16 +157,9 @@ func Chat(req ChatRequest) (*ChatResponse, error) {
 
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + req.APIKey
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
+	resp, err := doGeminiRequest(url, bodyJSON)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("gemini request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
