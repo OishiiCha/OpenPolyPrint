@@ -11,29 +11,29 @@ import (
 
 // ChatMessage is a single message in an AI chat conversation.
 type ChatMessage struct {
-	Role       string    `json:"role"`              // "user" or "model"
-	Text       string    `json:"text"`              // message text
-	HasImage   bool      `json:"hasImage"`          // true if this message includes a captured frame
-	ImagePath  string    `json:"imagePath,omitempty"` // relative path to the saved image
+	Role       string    `json:"role"`                 // "user" or "model"
+	Text       string    `json:"text"`                 // message text
+	HasImage   bool      `json:"hasImage"`             // true if this message includes captured frame(s)
+	ImagePaths []string  `json:"imagePaths,omitempty"` // relative paths to saved images
 	ImageMime  string    `json:"imageMime,omitempty"`
 	Timestamp  time.Time `json:"timestamp"`
 }
 
 // ChatConversation is a full conversation tied to a printer/print session.
 type ChatConversation struct {
-	ID         string        `json:"id"`
-	PrinterID  string        `json:"printerId"`
-	PrinterName string       `json:"printerName"`
-	File       string        `json:"file,omitempty"`
-	CreatedAt  time.Time     `json:"createdAt"`
-	Messages   []ChatMessage `json:"messages"`
+	ID          string        `json:"id"`
+	PrinterID   string        `json:"printerId"`
+	PrinterName string        `json:"printerName"`
+	File        string        `json:"file,omitempty"`
+	CreatedAt   time.Time     `json:"createdAt"`
+	Messages    []ChatMessage `json:"messages"`
 }
 
 // ChatStore persists AI chat conversations to disk.
 type ChatStore struct {
-	mu      sync.RWMutex
-	dir     string
-	convs   map[string]*ChatConversation
+	mu    sync.RWMutex
+	dir   string
+	convs map[string]*ChatConversation
 }
 
 // NewChatStore creates or loads a chat store from the given directory.
@@ -133,8 +133,10 @@ func (s *ChatStore) Delete(id string) error {
 	}
 	// Remove image files
 	for _, msg := range conv.Messages {
-		if msg.HasImage && msg.ImagePath != "" {
-			_ = os.Remove(filepath.Join(s.dir, msg.ImagePath))
+		if msg.HasImage {
+			for _, p := range msg.ImagePaths {
+				_ = os.Remove(filepath.Join(s.dir, p))
+			}
 		}
 	}
 	_ = os.Remove(filepath.Join(s.dir, id+".json"))
