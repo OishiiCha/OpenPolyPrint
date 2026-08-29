@@ -72,63 +72,73 @@ h4 {
 }
 
 /* ═════════════════════════════════════════════════════════════════
-   HONEYCOMB THEME
-   Warm amber/honey palette with beveled card corners and Nunito font.
-   Activated by adding `theme-honeycomb` class to <html>.
+   POLYGON THEME
+   Colorful dark theme with hexagon-shaped cards and Nunito font.
+   Activated by adding `theme-polygon` class to <html>.
    ═════════════════════════════════════════════════════════════════ */
 
-.theme-honeycomb {
-  /* Override color scheme */
-  color-scheme: light;
+.theme-polygon {
+  color-scheme: dark;
 }
 
-.theme-honeycomb body {
-  background-color: #fef9ef;
-  color: #5c4400;
+.theme-polygon body {
+  background-color: #1a1625;
+  color: #e2d8f0;
   font-family: 'Nunito', system-ui, sans-serif;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.04) 0%, transparent 60%);
 }
 
-.theme-honeycomb h1,
-.theme-honeycomb h2,
-.theme-honeycomb h3,
-.theme-honeycomb h4 {
+.theme-polygon h1,
+.theme-polygon h2,
+.theme-polygon h3,
+.theme-polygon h4 {
   font-family: 'Nunito', system-ui, sans-serif;
   font-weight: 700;
 }
 
-/* Honeycomb background pattern — subtle hexagonal pattern */
-.theme-honeycomb body {
-  background-image:
-    radial-gradient(circle at 50% 50%, rgba(217, 158, 36, 0.04) 2px, transparent 3px);
-  background-size: 28px 28px;
-}
-
 /* Sidebar */
-.theme-honeycomb .theme-honeycomb-sidebar,
-.theme-honeycomb aside {
-  background-color: #fff5d6 !important;
-  border-color: #e8c878 !important;
+.theme-polygon aside {
+  background-color: #221d33 !important;
+  border-color: #3d3258 !important;
 }
 
-.theme-honeycomb aside a span,
-.theme-honeycomb aside nav a {
-  color: #8b6914 !important;
+.theme-polygon aside nav a {
+  color: #a99bc4 !important;
 }
 
-.theme-honeycomb aside nav a:hover {
-  background-color: #f0d990 !important;
+.theme-polygon aside nav a:hover {
+  background-color: #2d2645 !important;
 }
 
-.theme-honeycomb aside nav a.bg-blue-600 {
-  background-color: #d99f24 !important;
+.theme-polygon aside nav a.bg-blue-600 {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
   color: #fff !important;
 }
 
-/* Cards — beveled corners using clip-path */
-.theme-honeycomb .border-2.border-slate-300,
-.theme-honeycomb .border-2.border-slate-700 {
-  background-color: #fffbeb !important;
-  border-color: #e8c878 !important;
+/* Hexagon-shaped cards — pronounced hexagonal clip-path */
+.theme-polygon .border-2.border-slate-300,
+.theme-polygon .border-2.border-slate-700 {
+  background-color: #2a2440 !important;
+  border: 2px solid #4a3d6b !important;
+  border-top: 4px solid #8b5cf6 !important;
+  clip-path: polygon(
+    20px 0,
+    calc(100% - 20px) 0,
+    100% 20px,
+    100% calc(100% - 20px),
+    calc(100% - 20px) 100%,
+    20px 100%,
+    0 calc(100% - 20px),
+    0 20px
+  );
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15) !important;
+}
+
+/* Hexagon corners for smaller cards */
+.theme-polygon .rounded-xl.border {
   clip-path: polygon(
     12px 0,
     calc(100% - 12px) 0,
@@ -139,152 +149,159 @@ h4 {
     0 calc(100% - 12px),
     0 12px
   );
-  box-shadow: 0 2px 8px rgba(217, 158, 36, 0.15) !important;
 }
 
-/* Beveled corners for smaller cards (rounded-xl elements) */
-.theme-honeycomb .rounded-xl.border {
-  clip-path: polygon(
-    8px 0,
-    calc(100% - 8px) 0,
-    100% 8px,
-    100% calc(100% - 8px),
-    calc(100% - 8px) 100%,
-    8px 100%,
-    0 calc(100% - 8px),
-    0 8px
-  );
+/* Text colors — purple/pink/cyan palette */
+.theme-polygon .text-slate-900 {
+  color: #f0e9ff !important;
+}
+.theme-polygon .text-slate-700 {
+  color: #c4b5d9 !important;
+}
+.theme-polygon .text-slate-600 {
+  color: #a99bc4 !important;
+}
+.theme-polygon .text-slate-500 {
+  color: #8b7da8 !important;
+}
+.theme-polygon .text-slate-400 {
+  color: #6b5f88 !important;
+}
+.theme-polygon .text-slate-300 {
+  color: #5a4f73 !important;
 }
 
-/* Text colors */
-.theme-honeycomb .text-slate-900 {
-  color: #5c4400 !important;
+/* Blue accent → purple/pink gradient accent */
+.theme-polygon .text-blue-600,
+.theme-polygon .text-blue-400 {
+  color: #a78bfa !important;
 }
-.theme-honeycomb .text-slate-700 {
-  color: #7a5c1a !important;
+.theme-polygon .text-blue-500 {
+  color: #c4b5fd !important;
 }
-.theme-honeycomb .text-slate-600 {
-  color: #8b6914 !important;
-}
-.theme-honeycomb .text-slate-500 {
-  color: #a08530 !important;
-}
-.theme-honeycomb .text-slate-400 {
-  color: #b89952 !important;
-}
-.theme-honeycomb .text-slate-300 {
-  color: #c9ab66 !important;
-}
-
-/* Blue accent → amber accent */
-.theme-honeycomb .text-blue-600,
-.theme-honeycomb .text-blue-400 {
-  color: #d99f24 !important;
-}
-.theme-honeycomb .text-blue-500 {
-  color: #e8a820 !important;
-}
-.theme-honeycomb .text-blue-700 {
-  color: #b87d10 !important;
+.theme-polygon .text-blue-700 {
+  color: #8b5cf6 !important;
 }
 
 /* Backgrounds */
-.theme-honeycomb .bg-slate-100 {
-  background-color: #f5e6c0 !important;
+.theme-polygon .bg-slate-100 {
+  background-color: #2d2645 !important;
 }
-.theme-honeycomb .bg-slate-200 {
-  background-color: #efd9a0 !important;
+.theme-polygon .bg-slate-200 {
+  background-color: #352d50 !important;
 }
-.theme-honeycomb .bg-slate-50 {
-  background-color: #faf0d8 !important;
+.theme-polygon .bg-slate-50 {
+  background-color: #251f3a !important;
 }
-.theme-honeycomb .bg-white {
-  background-color: #fffbeb !important;
+.theme-polygon .bg-white {
+  background-color: #2a2440 !important;
 }
 
-/* Blue backgrounds → amber */
-.theme-honeycomb .bg-blue-600 {
-  background-color: #d99f24 !important;
+/* Blue backgrounds → purple */
+.theme-polygon .bg-blue-600 {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899) !important;
 }
-.theme-honeycomb .bg-blue-100 {
-  background-color: #fde8b0 !important;
+.theme-polygon .bg-blue-100 {
+  background-color: #3d3258 !important;
 }
-.theme-honeycomb .bg-blue-900\/30 {
-  background-color: rgba(217, 158, 36, 0.2) !important;
+.theme-polygon .bg-blue-900\/30 {
+  background-color: rgba(139, 92, 246, 0.2) !important;
 }
 
 /* Borders */
-.theme-honeycomb .border-slate-200 {
-  border-color: #e8c878 !important;
+.theme-polygon .border-slate-200 {
+  border-color: #3d3258 !important;
 }
-.theme-honeycomb .border-slate-300 {
-  border-color: #d9b25e !important;
+.theme-polygon .border-slate-300 {
+  border-color: #4a3d6b !important;
 }
-.theme-honeycomb .border-slate-700,
-.theme-honeycomb .border-slate-800 {
-  border-color: #c9a84a !important;
+.theme-polygon .border-slate-700,
+.theme-polygon .border-slate-800 {
+  border-color: #3d3258 !important;
 }
 
-/* Blue border top → amber */
-.theme-honeycomb .border-t-blue-500 {
-  border-top-color: #d99f24 !important;
+/* Blue border top → purple */
+.theme-polygon .border-t-blue-500 {
+  border-top-color: #8b5cf6 !important;
 }
 
 /* Buttons */
-.theme-honeycomb .bg-slate-100:hover {
-  background-color: #efd9a0 !important;
+.theme-polygon .bg-slate-100:hover {
+  background-color: #352d50 !important;
 }
 
 /* Scrollbar */
-.theme-honeycomb ::-webkit-scrollbar-thumb {
-  background-color: #d9b25e !important;
+.theme-polygon ::-webkit-scrollbar-thumb {
+  background-color: #4a3d6b !important;
 }
-.theme-honeycomb ::-webkit-scrollbar-thumb:hover {
-  background-color: #c9a240 !important;
+.theme-polygon ::-webkit-scrollbar-thumb:hover {
+  background-color: #5a4f73 !important;
 }
 
-/* Status badges — keep semantic colors but warmer */
-.theme-honeycomb .bg-emerald-100 {
-  background-color: #d4f0d0 !important;
+/* Status badges — colorful but readable on dark */
+.theme-polygon .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
 }
-.theme-honeycomb .text-emerald-700 {
-  color: #4a7a3a !important;
+.theme-polygon .text-emerald-700 {
+  color: #34d399 !important;
 }
-.theme-honeycomb .bg-rose-100 {
-  background-color: #f8d8d0 !important;
+.theme-polygon .text-emerald-400 {
+  color: #34d399 !important;
 }
-.theme-honeycomb .text-rose-700 {
-  color: #b54a3a !important;
+.theme-polygon .bg-rose-100 {
+  background-color: rgba(244, 63, 94, 0.15) !important;
 }
-.theme-honeycomb .bg-amber-100 {
-  background-color: #fde8b0 !important;
+.theme-polygon .text-rose-700 {
+  color: #fb7185 !important;
 }
-.theme-honeycomb .text-amber-700 {
-  color: #8b6914 !important;
+.theme-polygon .text-rose-400 {
+  color: #fb7185 !important;
+}
+.theme-polygon .bg-amber-100 {
+  background-color: rgba(251, 191, 36, 0.15) !important;
+}
+.theme-polygon .text-amber-700 {
+  color: #fbbf24 !important;
+}
+.theme-polygon .text-amber-300 {
+  color: #fbbf24 !important;
 }
 
 /* Modal */
-.theme-honeycomb .bg-slate-950 {
-  background-color: #fffbeb !important;
+.theme-polygon .bg-slate-950 {
+  background-color: #1a1625 !important;
 }
-.theme-honeycomb .bg-slate-900 {
-  background-color: #fff5d6 !important;
+.theme-polygon .bg-slate-900 {
+  background-color: #221d33 !important;
 }
-.theme-honeycomb .bg-slate-800 {
-  background-color: #f5e6c0 !important;
+.theme-polygon .bg-slate-800 {
+  background-color: #2d2645 !important;
 }
-.theme-honeycomb .bg-slate-800\/50 {
-  background-color: rgba(245, 230, 192, 0.5) !important;
+.theme-polygon .bg-slate-800\/50 {
+  background-color: rgba(45, 38, 69, 0.5) !important;
 }
 
-/* Progress bars */
-.theme-honeycomb .bg-blue-600.h-full {
-  background-color: #d99f24 !important;
+/* Progress bars — gradient */
+.theme-polygon .bg-blue-600.h-full {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899) !important;
 }
 
 /* Inputs */
-.theme-honeycomb input,
-.theme-honeycomb select,
-.theme-honeycomb textarea {
+.theme-polygon input,
+.theme-polygon select,
+.theme-polygon textarea {
   font-family: 'Nunito', system-ui, sans-serif;
+  background-color: #221d33 !important;
+  border-color: #4a3d6b !important;
+  color: #e2d8f0 !important;
+}
+
+/* Focus ring → purple */
+.theme-polygon .focus\:ring-blue-500:focus {
+  --tw-ring-color: #8b5cf6 !important;
+}
+
+/* Black/80 overlay for modals */
+.theme-polygon .bg-black\/80 {
+  background-color: rgba(10, 8, 20, 0.85) !important;
 }

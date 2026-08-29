@@ -15,7 +15,7 @@ import { integrations } from './integrations'
 
 import type { AutoRecordSettings, TimelapseSettings } from './types'
 
-export type Theme = 'light' | 'dark' | 'honeycomb'
+export type Theme = 'light' | 'dark' | 'polygon'
 
 export interface AppConfig {
   dark: boolean

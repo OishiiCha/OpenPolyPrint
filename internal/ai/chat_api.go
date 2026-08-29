@@ -55,7 +55,7 @@ func Chat(req ChatRequest) (*ChatResponse, error) {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
 			ThinkingConfig  struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			} `json:"thinkingConfig"`
 		} `json:"generationConfig"`
 	}
@@ -66,15 +66,15 @@ func Chat(req ChatRequest) (*ChatResponse, error) {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
 			ThinkingConfig  struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			} `json:"thinkingConfig"`
 		}{
 			Temperature:     0.4,
 			MaxOutputTokens: 8192,
 			ThinkingConfig: struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			}{
-				ThinkingBudget: 0, // Disable thinking for faster, cheaper responses
+				ThinkingLevel: "minimal", // Minimal thinking for faster responses
 			},
 		},
 	}
@@ -84,7 +84,7 @@ func Chat(req ChatRequest) (*ChatResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + req.APIKey
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + req.APIKey
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
 	if err != nil {

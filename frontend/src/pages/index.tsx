@@ -3765,7 +3765,7 @@ export function Settings() {
                 {([
                   { value: 'light', label: 'Light', desc: 'Default light' },
                   { value: 'dark', label: 'Dark', desc: 'Dark mode' },
-                  { value: 'honeycomb', label: 'Honeycomb', desc: 'Warm amber' },
+                  { value: 'polygon', label: 'Polygon', desc: 'Colorful hexagons' },
                 ] as const).map((t) => (
                   <button
                     key={t.value}

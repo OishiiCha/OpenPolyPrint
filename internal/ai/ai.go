@@ -62,7 +62,7 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 	// Encode image as base64
 	imgBase64 := base64.StdEncoding.EncodeToString(frameData)
 
-	// Build Gemini API request (using gemini-2.5-flash for multimodal with good speed)
+	// Build Gemini API request (using gemini-3.6-flash for multimodal with good speed)
 	type part struct {
 		Text       string `json:"text,omitempty"`
 		InlineData struct {
@@ -79,7 +79,7 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
 			ThinkingConfig  struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			} `json:"thinkingConfig"`
 		} `json:"generationConfig"`
 	}
@@ -105,15 +105,15 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 			Temperature     float64 `json:"temperature"`
 			MaxOutputTokens int     `json:"maxOutputTokens"`
 			ThinkingConfig  struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			} `json:"thinkingConfig"`
 		}{
 			Temperature:     0.4,
 			MaxOutputTokens: 8192,
 			ThinkingConfig: struct {
-				ThinkingBudget int `json:"thinkingBudget"`
+				ThinkingLevel string `json:"thinkingLevel"`
 			}{
-				ThinkingBudget: 0,
+				ThinkingLevel: "minimal",
 			},
 		},
 	}
@@ -123,8 +123,8 @@ func Analyze(req AnalysisRequest) (*AnalysisResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Use gemini-2.5-flash for multimodal analysis
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + req.APIKey
+	// Use gemini-3.6-flash for multimodal analysis
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=" + req.APIKey
 
 	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
 	if err != nil {

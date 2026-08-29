@@ -132,11 +132,11 @@ export function Layout() {
   useEffect(() => {
     const el = document.documentElement
     // Remove all theme classes
-    el.classList.remove('dark', 'theme-honeycomb')
+    el.classList.remove('dark', 'theme-polygon')
     if (theme === 'dark') {
       el.classList.add('dark')
-    } else if (theme === 'honeycomb') {
-      el.classList.add('theme-honeycomb')
+    } else if (theme === 'polygon') {
+      el.classList.add('theme-polygon')
     }
   }, [theme])
 
@@ -191,15 +191,15 @@ export function Layout() {
           <button
             onClick={() => {
               const cfg = loadConfig()
-              const themes: Array<'light' | 'dark' | 'honeycomb'> = ['light', 'dark', 'honeycomb']
+              const themes: Array<'light' | 'dark' | 'polygon'> = ['light', 'dark', 'polygon']
               const currentIdx = themes.indexOf(cfg.theme)
               const nextTheme = themes[(currentIdx + 1) % themes.length]
               saveConfig({ ...cfg, theme: nextTheme, dark: nextTheme === 'dark' })
             }}
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800"
           >
-            {theme === 'dark' ? <Sun className="h-5 w-5" /> : theme === 'honeycomb' ? <Hexagon className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            {theme === 'dark' ? 'Light mode' : theme === 'honeycomb' ? 'Honeycomb' : 'Dark mode'}
+            {theme === 'dark' ? <Sun className="h-5 w-5" /> : theme === 'polygon' ? <Hexagon className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            {theme === 'dark' ? 'Light mode' : theme === 'polygon' ? 'Polygon' : 'Dark mode'}
           </button>
         </div>
       </aside>
