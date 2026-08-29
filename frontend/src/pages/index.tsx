@@ -503,79 +503,59 @@ export function Dashboard() {
         }
       />
 
-      {showSensors ? (
-        <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-          {/* Left: printers + cameras */}
-          <div className="space-y-6">
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {printers.map((p) => (
-                <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
-              ))}
-            </div>
-
-            {unassignedCameras.length > 0 && (
-              <div className="space-y-4">
-                <SectionTitle title="Unassigned cameras" />
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {unassignedCameras.map((c) => (
-                    <CameraCard key={c.id} camera={c} printers={printers} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: filament box sensors */}
-          <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
-            <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
+      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+        {/* Left: printers + cameras + sensors */}
+        <div className="space-y-6">
+          {showSensors && (
             <div className="space-y-3">
-              {enabledSensors.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
-                >
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block h-3 w-3 rounded-full"
-                        style={{ backgroundColor: s.color || '#64748b' }}
-                      />
-                      <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
-                        {s.name || `Box ${s.id}`}
+              <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
+              <div className="space-y-3">
+                {enabledSensors.map((s) => (
+                  <div
+                    key={s.id}
+                    className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-3 w-3 rounded-full"
+                          style={{ backgroundColor: s.color || '#64748b' }}
+                        />
+                        <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                          {s.name || `Box ${s.id}`}
+                        </span>
+                      </div>
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        {s.filamentType || '—'}
                       </span>
                     </div>
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                      {s.filamentType || '—'}
-                    </span>
+                    {s.error ? (
+                      <p className="font-mono text-xs text-rose-500">{s.error}</p>
+                    ) : s.hasReading ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="font-mono text-[10px] uppercase text-slate-400">temp</p>
+                          <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                            {s.temp?.toFixed(1)}°<span className="text-xs text-slate-400">C</span>
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-mono text-[10px] uppercase text-slate-400">humidity</p>
+                          <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
+                            {s.humidity?.toFixed(1)}<span className="text-xs text-slate-400">%</span>
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="font-mono text-xs text-slate-400">waiting for reading...</p>
+                    )}
                   </div>
-                  {s.error ? (
-                    <p className="font-mono text-xs text-rose-500">{s.error}</p>
-                  ) : s.hasReading ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <p className="font-mono text-[10px] uppercase text-slate-400">temp</p>
-                        <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
-                          {s.temp?.toFixed(1)}°<span className="text-xs text-slate-400">C</span>
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[10px] uppercase text-slate-400">humidity</p>
-                        <p className="font-mono text-lg font-semibold text-slate-900 dark:text-white">
-                          {s.humidity?.toFixed(1)}<span className="text-xs text-slate-400">%</span>
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="font-mono text-xs text-slate-400">waiting for reading...</p>
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+          )}
+
+          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
             {printers.map((p) => (
               <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
             ))}
@@ -591,14 +571,13 @@ export function Dashboard() {
               </div>
             </div>
           )}
+        </div>
 
-          {/* AI Print Assistant */}
-          <div className="space-y-4">
-            <SectionTitle title="AI Print Assistant" />
-            <AIChatPane printers={printers} />
-          </div>
-        </>
-      )}
+        {/* Right: AI chat sidebar */}
+        <div className="lg:sticky lg:top-4 lg:self-start">
+          <AIChatPane printers={printers} />
+        </div>
+      </div>
 
       {selected && <PrinterModal printer={selected} onClose={() => setSelected(null)} />}
     </div>
