@@ -708,9 +708,7 @@ func listMipiCameras() []mipiDevice {
 
 func serveMjpeg(w http.ResponseWriter, r *http.Request, streamer *UsbCameraStreamer) {
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Connection", "close")
+	w.Header().Set("Cache-Control", "no-cache")
 	sub := streamer.Subscribe()
 	defer streamer.Unsubscribe(sub)
 	for {

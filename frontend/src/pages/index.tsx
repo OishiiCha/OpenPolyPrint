@@ -200,6 +200,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
   const [recordMenuOpen, setRecordMenuOpen] = useState(false)
+  const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
 
@@ -218,14 +219,15 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
     return () => { active = false; clearInterval(interval) }
   }, [printer.id])
 
-  const startRecord = async (mode: 'video' | 'timelapse') => {
+  const startRecord = async (mode: 'video' | 'timelapse', interval: number = 0) => {
     setRecordMenuOpen(false)
+    setRecordModalOpen(false)
     if (isTest) { alert(`[test] start ${mode} recording for ${printer.name}`); return }
     try {
       const res = await fetch(`/api/printers/${printer.id}/record/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, interval: mode === 'timelapse' ? 1 : 0 }),
+        body: JSON.stringify({ mode, interval: mode === 'timelapse' ? interval : 0 }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Failed to start recording' }))
@@ -415,10 +417,10 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                       <Video className="h-4 w-4" /> Video (full speed)
                     </button>
                     <button
-                      onClick={() => startRecord('timelapse')}
+                      onClick={() => { setRecordMenuOpen(false); setRecordModalOpen(true) }}
                       className="flex w-full items-center gap-2 rounded px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
-                      <CameraIcon className="h-4 w-4" /> Timelapse (1fps)
+                      <CameraIcon className="h-4 w-4" /> Timelapse...
                     </button>
                   </div>
                 )}
@@ -630,6 +632,39 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Timelapse interval selection modal */}
+      {recordModalOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setRecordModalOpen(false)}
+        >
+          <div
+            className="dark w-full max-w-sm rounded-none border-2 border-slate-700 border-t-4 border-t-amber-500 bg-slate-950 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="font-mono text-lg font-semibold text-amber-400">[ timelapse ]</h2>
+              <button onClick={() => setRecordModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="mb-3 font-mono text-sm text-slate-400">Set the interval between frames.</p>
+            <div className="space-y-1.5">
+              {RATES.map((r) => (
+                <button
+                  key={r.value}
+                  onClick={() => startRecord('timelapse', r.value)}
+                  className="flex w-full items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2.5 font-mono text-sm text-slate-300 hover:bg-slate-800 hover:text-amber-400"
+                >
+                  <Timer className="h-4 w-4" /> {r.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>,
