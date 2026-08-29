@@ -19,6 +19,7 @@ import {
   Home,
   Layers,
   Lightbulb,
+  Maximize2,
   MoreVertical,
   Pause,
   Plus,
@@ -187,10 +188,11 @@ function PrinterGCodePreview({ fileName }: { fileName: string }) {
   )
 }
 
-function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: () => void; camera?: Camera }) {
+function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer; onOpen?: () => void; camera?: Camera; allCameras?: Camera[] }) {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
   const [recordMenuOpen, setRecordMenuOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
 
   // Poll recording status
@@ -274,6 +276,13 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Controls
               </button>
             )}
+            <button
+              onClick={() => setExpanded(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              title="Expand view"
+            >
+              <Maximize2 className="h-3.5 w-3.5" /> Expand
+            </button>
           </div>
         </div>
 
@@ -446,6 +455,178 @@ function PrinterCard({ printer, onOpen, camera }: { printer: Printer; onOpen?: (
           onClose={() => setShowPauseConfirm(false)}
         />
       )}
+
+      {/* Expand modal — near full-screen view of printer + all cameras */}
+      {expanded && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setExpanded(false)}
+        >
+          <div
+            className="dark flex max-h-[95vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-3">
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl bg-slate-800 p-2">
+                  <PrinterIcon className="h-5 w-5 text-slate-300" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-white">{printer.name}</h2>
+                  <p className="text-xs text-slate-400 capitalize">{printer.type}</p>
+                </div>
+                <span className={`ml-2 rounded-full px-2.5 py-1 text-xs font-medium ${statusColor[printer.status] || statusColor.Idle}`}>
+                  {printer.status}
+                </span>
+                {isRecording && (
+                  <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                    <CircleDot className="h-3 w-3 animate-pulse" /> REC
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="text-slate-400 hover:text-white"
+                title="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="grid gap-6 lg:grid-cols-3">
+                {/* Cameras — take up 2 columns */}
+                <div className="lg:col-span-2 space-y-4">
+                  {allCameras && allCameras.length > 0 ? (
+                    allCameras.filter((c) => c.enabled).map((cam) => (
+                      <div key={cam.id} className="overflow-hidden rounded-xl border border-slate-700">
+                        <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900 px-3 py-1.5">
+                          <Video className="h-3.5 w-3.5 text-blue-400" />
+                          <span className="text-xs font-medium text-slate-300">{cam.name}</span>
+                          <span className="text-[10px] text-slate-500 capitalize">{cam.type}</span>
+                        </div>
+                        {cam.url ? (
+                          <img
+                            src={cam.url}
+                            alt={cam.name}
+                            className="aspect-video w-full object-cover bg-black"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        ) : (
+                          <div className="flex aspect-video items-center justify-center bg-slate-800 text-sm text-slate-500">
+                            No stream
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-slate-700 bg-slate-900 text-sm text-slate-500">
+                      No cameras assigned to this printer
+                    </div>
+                  )}
+
+                  {/* G-code preview if printing */}
+                  {printer.status === 'Printing' && printer.currentFile && (
+                    <div className="overflow-hidden rounded-xl border border-slate-700">
+                      <div className="border-b border-slate-700 bg-slate-900 px-3 py-1.5">
+                        <span className="text-xs font-medium text-slate-300">G-code Preview: {printer.currentFile}</span>
+                      </div>
+                      <PrinterGCodePreview fileName={printer.currentFile} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Details — 1 column */}
+                <div className="space-y-4">
+                  {/* Temperatures */}
+                  <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-white">Temperatures</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <Flame className="h-5 w-5 text-rose-500" />
+                        <div className="flex-1">
+                          <p className="text-xs text-slate-400">Nozzle</p>
+                          <p className="text-lg font-semibold text-white">
+                            {printer.temps.nozzle}° / {printer.temps.targetNozzle}°
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Thermometer className="h-5 w-5 text-blue-500" />
+                        <div className="flex-1">
+                          <p className="text-xs text-slate-400">Bed</p>
+                          <p className="text-lg font-semibold text-white">
+                            {printer.temps.bed}° / {printer.temps.targetBed}°
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Print progress */}
+                  {printer.status === 'Printing' && (
+                    <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+                      <h3 className="mb-3 text-sm font-semibold text-white">Print Progress</h3>
+                      <p className="mb-2 truncate text-xs text-slate-400" title={printer.currentFile}>{printer.currentFile}</p>
+                      <div className="h-3 w-full overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-blue-600 transition-all"
+                          style={{ width: `${printer.progress}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <p className="text-lg font-bold text-blue-400">{printer.progress}%</p>
+                        <span className="rounded-full bg-blue-900/40 px-2.5 py-1 text-xs font-medium text-blue-300">
+                          {printer.remainingTime} left
+                        </span>
+                      </div>
+                      {(printer.layerCount ?? 0) > 0 && (
+                        <div className="mt-3 flex items-center gap-2 rounded-lg bg-slate-800/50 px-3 py-2">
+                          <Layers className="h-4 w-4 text-slate-400" />
+                          <span className="font-mono text-sm font-semibold text-white">
+                            Layer {printer.layerNum || 0} / {printer.layerCount}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Controls */}
+                  <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-white">Controls</h3>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setShowPauseConfirm(true)}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700"
+                      >
+                        <Pause className="h-4 w-4" /> Pause
+                      </button>
+                      <button
+                        onClick={() => setShowConfirm(true)}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-rose-900/40 px-3 py-2 text-sm font-medium text-rose-300 hover:bg-rose-900/60"
+                      >
+                        <Square className="h-4 w-4" /> Stop
+                      </button>
+                      {onOpen && (
+                        <button
+                          onClick={() => { setExpanded(false); onOpen() }}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
+                        >
+                          <SlidersHorizontal className="h-4 w-4" /> Full Controls
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }
@@ -554,7 +735,7 @@ export function Dashboard() {
 
         <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
           {printers.map((p) => (
-            <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
+            <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} allCameras={cameras.filter((c) => c.printerId === p.id)} />
           ))}
         </div>
 
@@ -982,7 +1163,7 @@ export function Printers() {
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {printers.map((p) => (
-          <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} />
+          <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} allCameras={cameras.filter((c) => c.printerId === p.id)} />
         ))}
       </div>
 
