@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { Send, Sparkles, Loader2, Trash2, Camera, Link2, Plus, MessageSquare, PanelRightClose, PanelRightOpen, FileCode, X, ArrowLeft, Clock, Upload } from 'lucide-react'
 import { usePrinters } from '../hooks/usePrinters'
 import { useGCodeFiles } from '../hooks/useGCodeFiles'
@@ -258,7 +259,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   }
 
   return (
-    <aside className="flex w-80 flex-col border-l border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950">
+    <aside className="flex w-96 flex-col border-l border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 p-3 dark:border-slate-800">
         <div className="flex items-center gap-2">
@@ -602,8 +603,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
                       ))}
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap break-words">
-                    {renderText(msg.text)}
+                  <div className={msg.role === 'user' ? 'whitespace-pre-wrap break-words' : 'break-words'}>
+                    {msg.role === 'user' ? msg.text : renderText(msg.text)}
                   </div>
                 </div>
               </div>
@@ -727,21 +728,31 @@ function formatDate(iso: string): string {
   }
 }
 
-// renderText renders simple markdown-like formatting (bold, headers, lists)
+// renderText renders markdown text with proper formatting.
+// Used for AI responses which contain headers, lists, bold, etc.
 function renderText(text: string): ReactNode {
-  const lines = text.split('\n')
-  return lines.map((line, idx) => {
-    const parts = line.split(/(\*\*[^*]+\*\*)/g)
-    return (
-      <span key={idx}>
-        {parts.map((part, i) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={i}>{part.slice(2, -2)}</strong>
-          }
-          return <span key={i}>{part}</span>
-        })}
-        {idx < lines.length - 1 && '\n'}
-      </span>
-    )
-  })
+  return (
+    <div className="chat-markdown">
+      <ReactMarkdown
+        components={{
+          h1: ({ children }) => <h3 className="mb-1 mt-2 text-sm font-bold">{children}</h3>,
+          h2: ({ children }) => <h3 className="mb-1 mt-2 text-sm font-bold">{children}</h3>,
+          h3: ({ children }) => <h4 className="mb-1 mt-1.5 text-xs font-bold">{children}</h4>,
+          p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="mb-1.5 ml-4 list-disc space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-1.5 ml-4 list-decimal space-y-0.5">{children}</ol>,
+          li: ({ children }) => <li className="text-sm">{children}</li>,
+          strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children }) => <code className="rounded bg-slate-200 px-1 py-0.5 text-xs dark:bg-slate-700">{children}</code>,
+          pre: ({ children }) => <pre className="mb-2 overflow-x-auto rounded-lg bg-slate-200 p-2 text-xs dark:bg-slate-700">{children}</pre>,
+          hr: () => <hr className="my-2 border-slate-300 dark:border-slate-600" />,
+          a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">{children}</a>,
+          blockquote: ({ children }) => <blockquote className="border-l-2 border-slate-300 pl-2 italic dark:border-slate-600">{children}</blockquote>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
 }
