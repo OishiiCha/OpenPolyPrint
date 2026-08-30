@@ -125,6 +125,8 @@ var publicPaths = map[string]bool{
 	"/api/printerprofiles": true, // OctoPrint compat
 	"/manifest.json":       true,
 	"/sw.js":               true,
+	"/favicon.ico":         true,
+	"/logo.svg":            true,
 	"/api/tls/ca":          true,
 	"/api/tls/install/":    true,
 }

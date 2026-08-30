@@ -3220,6 +3220,11 @@ func main() {
 			w.Header().Set("Service-Worker-Allowed", "/")
 			http.ServeFile(w, r, filepath.Join(dist, "sw.js"))
 		})
+		// Serve favicon.ico — browsers request this automatically.
+		// Redirect to the PNG icon since we don't have a .ico file.
+		mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(dist, "icon-192.png"))
+		})
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Set correct MIME types for common static files
 			ext := filepath.Ext(r.URL.Path)
