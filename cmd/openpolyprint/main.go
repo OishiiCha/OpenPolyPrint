@@ -2401,7 +2401,7 @@ func main() {
 				return
 			}
 			target := profileconverter.Format(r.FormValue("target"))
-			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer {
+			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer && target != profileconverter.FormatOrcaSlicer {
 				http.Error(w, `{"error":"invalid target format"}`, http.StatusBadRequest)
 				return
 			}
@@ -2419,6 +2419,8 @@ func main() {
 				slicer := "prusaslicer"
 				if target == profileconverter.FormatCura {
 					slicer = "cura"
+				} else if target == profileconverter.FormatOrcaSlicer {
+					slicer = "orcaslicer"
 				}
 				var tags []string
 				if tagsStr := r.FormValue("tags"); tagsStr != "" {
@@ -2462,7 +2464,7 @@ func main() {
 				return
 			}
 			target := profileconverter.Format(body.Target)
-			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer {
+			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer && target != profileconverter.FormatOrcaSlicer {
 				http.Error(w, `{"error":"invalid target format"}`, http.StatusBadRequest)
 				return
 			}
@@ -2479,6 +2481,8 @@ func main() {
 				slicer := "prusaslicer"
 				if target == profileconverter.FormatCura {
 					slicer = "cura"
+				} else if target == profileconverter.FormatOrcaSlicer {
+					slicer = "orcaslicer"
 				}
 				saved, err := profileFilesStore.Add(
 					strings.TrimSuffix(result.Filename, filepath.Ext(result.Filename)),

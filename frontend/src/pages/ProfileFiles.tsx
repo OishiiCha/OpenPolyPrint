@@ -592,7 +592,7 @@ function ConvertModal({ file, category, onClose, onConverted }: {
   onClose: () => void
   onConverted: () => void
 }) {
-  const [target, setTarget] = useState<'prusaslicer' | 'cura'>('prusaslicer')
+  const [target, setTarget] = useState<'prusaslicer' | 'cura' | 'orcaslicer'>('prusaslicer')
   const [saveResult, setSaveResult] = useState(true)
   const [converting, setConverting] = useState(false)
   const [result, setResult] = useState<ConversionResult | null>(null)
@@ -702,7 +702,7 @@ function ConvertModal({ file, category, onClose, onConverted }: {
           {/* Target format */}
           <div>
             <label className="mb-1 block text-xs text-slate-400">Convert to</label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setTarget('prusaslicer')}
                 className={`flex-1 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-colors ${
@@ -712,6 +712,16 @@ function ConvertModal({ file, category, onClose, onConverted }: {
                 }`}
               >
                 PrusaSlicer / eufyMake Studio (.ini)
+              </button>
+              <button
+                onClick={() => setTarget('orcaslicer')}
+                className={`flex-1 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-colors ${
+                  target === 'orcaslicer'
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                    : 'border-slate-700 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                OrcaSlicer / BambuStudio (.json)
               </button>
               <button
                 onClick={() => setTarget('cura')}

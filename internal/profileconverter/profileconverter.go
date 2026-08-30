@@ -15,6 +15,7 @@ type Format string
 const (
 	FormatCura        Format = "cura"        // Cura / AnkerMake Slicer (.inst.cfg + .def.json)
 	FormatPrusaSlicer Format = "prusaslicer" // PrusaSlicer / eufyMake Studio (.ini)
+	FormatOrcaSlicer  Format = "orcaslicer"  // OrcaSlicer / BambuStudio (.json)
 )
 
 // ConversionResult holds the converted profile content and metadata.
@@ -42,12 +43,25 @@ func Convert(content string, filename string, target Format) (*ConversionResult,
 
 	switch source {
 	case FormatCura:
-		if target == FormatPrusaSlicer {
+		switch target {
+		case FormatPrusaSlicer:
 			return curaToPrusaSlicer(content, filename)
+		case FormatOrcaSlicer:
+			return curaToOrcaSlicer(content, filename)
 		}
 	case FormatPrusaSlicer:
-		if target == FormatCura {
+		switch target {
+		case FormatCura:
 			return prusaSlicerToCura(content, filename)
+		case FormatOrcaSlicer:
+			return prusaSlicerToOrcaSlicer(content, filename)
+		}
+	case FormatOrcaSlicer:
+		switch target {
+		case FormatPrusaSlicer:
+			return orcaSlicerToPrusaSlicer(content, filename)
+		case FormatCura:
+			return orcaSlicerToCura(content, filename)
 		}
 	}
 	return nil, fmt.Errorf("unsupported conversion: %s → %s", source, target)
@@ -55,29 +69,77 @@ func Convert(content string, filename string, target Format) (*ConversionResult,
 
 // DetectFormat tries to determine the profile format from content and filename.
 func DetectFormat(content, filename string) Format {
-	// JSON content → Cura .def.json
 	trimmed := strings.TrimSpace(content)
+	lower := strings.ToLower(filename)
+
+	// JSON content → could be Cura .def.json or OrcaSlicer .json
 	if strings.HasPrefix(trimmed, "{") {
+		// OrcaSlicer JSON has "print_settings_id" or "inherits" or "from" keys
+		// Cura .def.json has "overrides" and "metadata" with "manufacturer"
+		if strings.Contains(trimmed, "\"print_settings_id\"") ||
+			strings.Contains(trimmed, "\"filament_settings_id\"") ||
+			strings.Contains(trimmed, "\"printer_settings_id\"") ||
+			(strings.Contains(trimmed, "\"inherits\"") && strings.Contains(trimmed, "\"from\"")) {
+			return FormatOrcaSlicer
+		}
+		// Cura .def.json has "overrides" key
+		if strings.Contains(trimmed, "\"overrides\"") {
+			return FormatCura
+		}
+		// Default JSON → OrcaSlicer (since Cura .def.json is rarer as an upload)
+		if strings.HasSuffix(lower, ".json") {
+			return FormatOrcaSlicer
+		}
 		return FormatCura
 	}
+
 	// .inst.cfg files have [general] and [values] sections
 	if strings.Contains(content, "[general]") && strings.Contains(content, "[values]") {
 		return FormatCura
 	}
-	// PrusaSlicer INI has sections like [print:...], [filament:...], [printer:...]
+
+	// PrusaSlicer INI with sections like [print:...], [filament:...], [printer:...]
 	if strings.Contains(content, "[print:") || strings.Contains(content, "[filament:") || strings.Contains(content, "[printer:") {
 		return FormatPrusaSlicer
 	}
+
+	// Flat PrusaSlicer INI (eufyMake/AnkerMake Studio export) — has key=value
+	// pairs with no sections, but contains known PrusaSlicer keys
+	if hasPrusaSlicerKeys(content) {
+		return FormatPrusaSlicer
+	}
+
 	// Check filename extension
-	lower := strings.ToLower(filename)
 	if strings.HasSuffix(lower, ".def.json") || strings.HasSuffix(lower, ".inst.cfg") {
 		return FormatCura
+	}
+	if strings.HasSuffix(lower, ".json") {
+		return FormatOrcaSlicer
 	}
 	if strings.HasSuffix(lower, ".ini") {
 		return FormatPrusaSlicer
 	}
+
 	// Default: treat as PrusaSlicer INI
 	return FormatPrusaSlicer
+}
+
+// hasPrusaSlicerKeys checks if content contains known PrusaSlicer setting keys
+// without any section headers (flat INI format from eufyMake/AnkerMake Studio).
+func hasPrusaSlicerKeys(content string) bool {
+	knownKeys := []string{
+		"layer_height", "fill_density", "perimeters", "nozzle_diameter",
+		"filament_diameter", "bed_temperature", "retract_length",
+		"print_speed", "infill_speed", "perimeter_speed",
+		"printer_model", "filament_type", "bed_shape",
+	}
+	count := 0
+	for _, key := range knownKeys {
+		if strings.Contains(content, key+" =") || strings.Contains(content, key+"=") {
+			count++
+		}
+	}
+	return count >= 3
 }
 
 // ─── Cura → PrusaSlicer ──────────────────────────────────────────────────────
@@ -438,33 +500,34 @@ func prusaSlicerToCura(content string, filename string) (*ConversionResult, erro
 	warnings := []string{}
 	unmapped := []string{}
 
-	// Parse PrusaSlicer INI
+	// Parse PrusaSlicer INI — could be sectioned ([print:...]) or flat (eufyMake export)
 	sections := parsePrusaSlicerINI(content)
 
-	// Collect all settings from all sections
 	allSettings := map[string]string{}
-	var printSectionName, filamentSectionName, printerSectionName string
-	_ = filamentSectionName
-	_ = printerSectionName
+	var printSectionName string
 
-	for _, sec := range sections {
-		switch {
-		case strings.HasPrefix(sec.name, "print:"):
-			printSectionName = sec.name
-			for k, v := range sec.keys {
-				allSettings[k] = v
-			}
-		case strings.HasPrefix(sec.name, "filament:"):
-			filamentSectionName = sec.name
-			for k, v := range sec.keys {
-				allSettings[k] = v
-			}
-		case strings.HasPrefix(sec.name, "printer:"):
-			printerSectionName = sec.name
-			for k, v := range sec.keys {
-				allSettings[k] = v
+	if len(sections) > 0 {
+		// Sectioned INI — collect settings from all sections
+		for _, sec := range sections {
+			switch {
+			case strings.HasPrefix(sec.name, "print:"):
+				printSectionName = sec.name
+				for k, v := range sec.keys {
+					allSettings[k] = v
+				}
+			case strings.HasPrefix(sec.name, "filament:"):
+				for k, v := range sec.keys {
+					allSettings[k] = v
+				}
+			case strings.HasPrefix(sec.name, "printer:"):
+				for k, v := range sec.keys {
+					allSettings[k] = v
+				}
 			}
 		}
+	} else {
+		// Flat INI (eufyMake/AnkerMake Studio export) — all key=value pairs
+		allSettings = parseFlatINI(content)
 	}
 
 	// Build Cura values
@@ -571,6 +634,85 @@ func parsePrusaSlicerINI(content string) []psSection {
 		sections = append(sections, *current)
 	}
 	return sections
+}
+
+// parseFlatINI parses a flat INI file with no section headers (eufyMake/AnkerMake
+// Studio config export). All key=value pairs are returned in a single map.
+func parseFlatINI(content string) map[string]string {
+	result := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		// Skip section headers (shouldn't be any in flat INI, but just in case)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			continue
+		}
+		if idx := strings.Index(line, "="); idx > 0 {
+			key := strings.TrimSpace(line[:idx])
+			val := strings.TrimSpace(line[idx+1:])
+			// Strip surrounding quotes
+			if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+				val = val[1 : len(val)-1]
+			}
+			result[key] = val
+		}
+	}
+	return result
+}
+
+// parseOrcaSlicerJSON parses an OrcaSlicer/BambuStudio JSON profile.
+// These profiles can be print, filament, or printer profiles.
+// They contain setting keys directly in the JSON root, plus metadata
+// like "inherits", "name", "from", "version", etc.
+func parseOrcaSlicerJSON(content string) (map[string]string, map[string]string) {
+	values := map[string]string{}
+	meta := map[string]string{}
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return values, meta
+	}
+	// Metadata keys that are not slicer settings
+	metaKeys := map[string]bool{
+		"from": true, "inherits": true, "name": true, "version": true,
+		"print_settings_id": true, "filament_settings_id": true,
+		"printer_settings_id": true, "print_extruder_id": true,
+		"print_extruder_variant": true, "enable": true,
+	}
+	for key, val := range raw {
+		if metaKeys[key] {
+			meta[key] = fmt.Sprintf("%v", val)
+			continue
+		}
+		// Convert value to string
+		switch v := val.(type) {
+		case string:
+			values[key] = v
+		case float64:
+			if v == float64(int(v)) {
+				values[key] = strconv.Itoa(int(v))
+			} else {
+				values[key] = strconv.FormatFloat(v, 'f', -1, 64)
+			}
+		case bool:
+			if v {
+				values[key] = "1"
+			} else {
+				values[key] = "0"
+			}
+		case []interface{}:
+			// Arrays (like print_extruder_id) — join with comma
+			parts := make([]string, 0, len(v))
+			for _, item := range v {
+				parts = append(parts, fmt.Sprintf("%v", item))
+			}
+			values[key] = strings.Join(parts, ",")
+		default:
+			values[key] = fmt.Sprintf("%v", val)
+		}
+	}
+	return values, meta
 }
 
 func parseCuraCFG(content string) (map[string]string, map[string]string) {
@@ -682,6 +824,13 @@ func isPSMetaKey(key string) bool {
 }
 
 // Transform functions
+func filepathExt(filename string) string {
+	if idx := strings.LastIndex(filename, "."); idx > 0 {
+		return filename[idx:]
+	}
+	return ""
+}
+
 func divBy100(s string) string {
 	if v, err := strconv.ParseFloat(s, 64); err == nil {
 		return fmt.Sprintf("%.2f", v/100)
@@ -786,4 +935,341 @@ func parseBedShape(shape string) (width, depth string) {
 		depth = matches[2][2]
 	}
 	return
+}
+
+// ─── OrcaSlicer JSON conversions ─────────────────────────────────────────────
+// OrcaSlicer/BambuStudio uses the same setting names as PrusaSlicer, but the
+// profile is stored as JSON instead of INI. So conversion between OrcaSlicer
+// and PrusaSlicer is mostly a format change (JSON ↔ INI), while conversion
+// between OrcaSlicer and Cura uses the same mapping as PrusaSlicer ↔ Cura.
+
+func orcaSlicerToPrusaSlicer(content string, filename string) (*ConversionResult, error) {
+	warnings := []string{}
+	unmapped := []string{}
+
+	values, meta := parseOrcaSlicerJSON(content)
+
+	if len(values) == 0 {
+		warnings = append(warnings, "No settings found in OrcaSlicer JSON. This profile may only contain overrides (inherits from a base profile). The base profile settings are not included in the export.")
+	}
+
+	// Determine profile name
+	profileName := meta["name"]
+	if profileName == "" {
+		profileName = meta["print_settings_id"]
+	}
+	if profileName == "" {
+		profileName = "Converted"
+	}
+
+	// Determine which type of profile this is
+	var profileType string
+	if meta["print_settings_id"] != "" || strings.Contains(filename, "print") {
+		profileType = "print"
+	} else if meta["filament_settings_id"] != "" || strings.Contains(filename, "filament") {
+		profileType = "filament"
+	} else if meta["printer_settings_id"] != "" || strings.Contains(filename, "printer") {
+		profileType = "printer"
+	} else {
+		profileType = "print" // default
+	}
+
+	// Build INI output
+	var sb strings.Builder
+	sb.WriteString("# Generated by OpenPolyPrint profile converter\n")
+	sb.WriteString("# Source: OrcaSlicer/BambuStudio JSON format\n")
+	sb.WriteString("# Target: PrusaSlicer/eufyMake Studio INI format\n")
+	if meta["inherits"] != "" {
+		sb.WriteString(fmt.Sprintf("# Inherits: %s\n", meta["inherits"]))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString(fmt.Sprintf("[%s:%s]\n", profileType, profileName))
+	if meta["inherits"] != "" {
+		sb.WriteString(fmt.Sprintf("inherits = %s\n", meta["inherits"]))
+	}
+
+	// Sort keys for stable output
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		// Skip OrcaSlicer-specific meta keys
+		if isOrcaMetaKey(k) {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("%s = %s\n", k, values[k]))
+	}
+
+	if len(unmapped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d settings could not be mapped: %s", len(unmapped), strings.Join(unmapped, ", ")))
+	}
+
+	result := &ConversionResult{
+		Content:  sb.String(),
+		Filename: strings.TrimSuffix(filename, filepathExt(filename)) + "_prusaslicer.ini",
+		Format:   FormatPrusaSlicer,
+		Warnings: warnings,
+		Unmapped: unmapped,
+		Sections: countSections(sb.String()),
+	}
+	return result, nil
+}
+
+func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult, error) {
+	warnings := []string{}
+	unmapped := []string{}
+
+	// Parse PrusaSlicer INI — could be sectioned or flat
+	sections := parsePrusaSlicerINI(content)
+	allSettings := map[string]string{}
+	var profileName string
+
+	if len(sections) > 0 {
+		for _, sec := range sections {
+			if profileName == "" && strings.Contains(sec.name, ":") {
+				profileName = strings.SplitN(sec.name, ":", 2)[1]
+			}
+			for k, v := range sec.keys {
+				allSettings[k] = v
+			}
+		}
+	} else {
+		allSettings = parseFlatINI(content)
+	}
+
+	if profileName == "" {
+		profileName = strings.TrimSuffix(filename, filepathExt(filename))
+		if profileName == "" {
+			profileName = "Converted"
+		}
+	}
+
+	// Build JSON output
+	jsonMap := map[string]interface{}{
+		"from":              "OpenPolyPrint Converter",
+		"name":              profileName,
+		"version":           "2.4.0.1",
+		"print_settings_id": profileName,
+	}
+
+	mapped := 0
+	for k, v := range allSettings {
+		if isPSMetaKey(k) || isOrcaMetaKey(k) {
+			continue
+		}
+		// Try to convert string to number or bool for JSON
+		if v == "1" || v == "true" {
+			jsonMap[k] = true
+		} else if v == "0" || v == "false" {
+			jsonMap[k] = false
+		} else if i, err := strconv.Atoi(v); err == nil {
+			jsonMap[k] = i
+		} else if f, err := strconv.ParseFloat(v, 64); err == nil {
+			jsonMap[k] = f
+		} else {
+			jsonMap[k] = v
+		}
+		mapped++
+	}
+
+	if mapped == 0 {
+		warnings = append(warnings, "No settings were mapped. Check that the source file contains valid PrusaSlicer settings.")
+	}
+
+	jsonData, err := json.MarshalIndent(jsonMap, "", "\t")
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode JSON: %w", err)
+	}
+
+	if len(unmapped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d settings could not be mapped: %s", len(unmapped), strings.Join(unmapped, ", ")))
+	}
+
+	result := &ConversionResult{
+		Content:  string(jsonData),
+		Filename: strings.TrimSuffix(filename, filepathExt(filename)) + "_orcaslicer.json",
+		Format:   FormatOrcaSlicer,
+		Warnings: warnings,
+		Unmapped: unmapped,
+	}
+	return result, nil
+}
+
+func orcaSlicerToCura(content string, filename string) (*ConversionResult, error) {
+	warnings := []string{}
+	unmapped := []string{}
+
+	values, meta := parseOrcaSlicerJSON(content)
+
+	if len(values) == 0 {
+		warnings = append(warnings, "No settings found in OrcaSlicer JSON. This profile may only contain overrides (inherits from a base profile). The base profile settings are not included in the export.")
+	}
+
+	// OrcaSlicer uses same setting names as PrusaSlicer, so reuse psToCuraMap
+	curaValues := map[string]string{}
+
+	for psKey, psVal := range values {
+		mapping, ok := psToCuraMap[psKey]
+		if !ok {
+			if isPSMetaKey(psKey) || isOrcaMetaKey(psKey) {
+				continue
+			}
+			unmapped = append(unmapped, psKey)
+			continue
+		}
+
+		val := psVal
+		if mapping.transform != nil {
+			val = mapping.transform(val)
+		}
+		curaValues[mapping.psKey] = val
+	}
+
+	// Parse bed_shape
+	if bedShape, ok := values["bed_shape"]; ok {
+		w, d := parseBedShape(bedShape)
+		if w != "" && d != "" {
+			curaValues["machine_width"] = w
+			curaValues["machine_depth"] = d
+		}
+	}
+
+	qualityName := meta["name"]
+	if qualityName == "" {
+		qualityName = "Converted"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[general]\n")
+	sb.WriteString("definition = ankermake_m5\n")
+	sb.WriteString(fmt.Sprintf("name = %s\n", qualityName))
+	sb.WriteString("version = 4\n\n")
+
+	sb.WriteString("[metadata]\n")
+	sb.WriteString("global_quality = True\n")
+	sb.WriteString(fmt.Sprintf("quality_type = %s\n", curaQualityType(qualityName)))
+	sb.WriteString("setting_version = 20\n")
+	sb.WriteString("type = quality\n")
+	sb.WriteString("weight = 0\n\n")
+
+	sb.WriteString("[values]\n")
+	writeSettings(&sb, curaValues)
+
+	sort.Strings(unmapped)
+	if len(unmapped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d settings could not be mapped: %s", len(unmapped), strings.Join(unmapped, ", ")))
+	}
+	warnings = append(warnings, "Cura quality profiles only contain print settings; filament and printer settings need to be configured separately in Cura")
+
+	result := &ConversionResult{
+		Content:  sb.String(),
+		Filename: strings.TrimSuffix(filename, filepathExt(filename)) + "_cura.inst.cfg",
+		Format:   FormatCura,
+		Warnings: warnings,
+		Unmapped: unmapped,
+		Sections: countSections(sb.String()),
+	}
+	return result, nil
+}
+
+func curaToOrcaSlicer(content string, filename string) (*ConversionResult, error) {
+	warnings := []string{}
+	unmapped := []string{}
+
+	// Parse Cura content
+	var curaValues map[string]string
+	var curaMeta map[string]string
+
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "{") {
+		curaValues, curaMeta = parseCuraJSON(content)
+	} else {
+		curaValues, curaMeta = parseCuraCFG(content)
+	}
+
+	// Convert Cura values to PrusaSlicer/OrcaSlicer setting names
+	// (OrcaSlicer uses PrusaSlicer setting names)
+	orcaValues := map[string]string{}
+
+	for curaKey, curaVal := range curaValues {
+		mapping, ok := curaToPSMap[curaKey]
+		if !ok {
+			if isCuraMetaKey(curaKey) {
+				continue
+			}
+			unmapped = append(unmapped, curaKey)
+			continue
+		}
+
+		// Skip special placeholder keys
+		if strings.HasPrefix(mapping.psKey, "_") {
+			continue
+		}
+
+		val := curaVal
+		if mapping.transform != nil {
+			val = mapping.transform(val)
+		}
+		orcaValues[mapping.psKey] = val
+	}
+
+	profileName := curaMeta["name"]
+	if profileName == "" {
+		profileName = "Converted"
+	}
+
+	// Build JSON
+	jsonMap := map[string]interface{}{
+		"from":              "OpenPolyPrint Converter",
+		"name":              profileName,
+		"version":           "2.4.0.1",
+		"print_settings_id": profileName,
+	}
+
+	for k, v := range orcaValues {
+		if v == "1" || v == "true" {
+			jsonMap[k] = true
+		} else if v == "0" || v == "false" {
+			jsonMap[k] = false
+		} else if i, err := strconv.Atoi(v); err == nil {
+			jsonMap[k] = i
+		} else if f, err := strconv.ParseFloat(v, 64); err == nil {
+			jsonMap[k] = f
+		} else {
+			jsonMap[k] = v
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(jsonMap, "", "\t")
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode JSON: %w", err)
+	}
+
+	sort.Strings(unmapped)
+	if len(unmapped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d settings could not be mapped: %s", len(unmapped), strings.Join(unmapped, ", ")))
+	}
+
+	result := &ConversionResult{
+		Content:  string(jsonData),
+		Filename: strings.TrimSuffix(filename, filepathExt(filename)) + "_orcaslicer.json",
+		Format:   FormatOrcaSlicer,
+		Warnings: warnings,
+		Unmapped: unmapped,
+	}
+	return result, nil
+}
+
+func isOrcaMetaKey(key string) bool {
+	metaKeys := map[string]bool{
+		"from": true, "inherits": true, "name": true, "version": true,
+		"print_settings_id": true, "filament_settings_id": true,
+		"printer_settings_id": true, "print_extruder_id": true,
+		"print_extruder_variant": true, "enable": true,
+		"anker_colour_id": true, "anker_filament_id": true,
+	}
+	return metaKeys[key]
 }
