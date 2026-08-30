@@ -13,6 +13,7 @@ import {
   Save,
 } from 'lucide-react'
 import { STLViewer } from '../components/STLViewer'
+import { STLThumbnail } from '../components/STLViewer'
 
 interface STLFile {
   id: string
@@ -176,38 +177,41 @@ export function STLFiles() {
           {filtered.map((f) => (
             <div
               key={f.id}
-              className="group rounded-xl border border-slate-200 p-4 dark:border-slate-700"
+              className="group cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700"
+              onClick={() => setViewing(f)}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <h3 className="truncate font-medium text-slate-900 dark:text-white">{f.name}</h3>
-                  <p className="truncate text-xs text-slate-400">{f.filename}</p>
-                </div>
-                <div className="flex shrink-0 gap-1">
+              {/* 3D preview thumbnail */}
+              <div className="relative h-32 w-full overflow-hidden rounded-t-xl border-b border-slate-200 dark:border-slate-700">
+                <STLThumbnail
+                  url={`/api/stl-files/${f.id}`}
+                  className="h-full w-full"
+                />
+                {/* Hover overlay with action buttons */}
+                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-slate-950/0 opacity-0 transition-all group-hover:bg-slate-950/40 group-hover:opacity-100">
                   <button
-                    onClick={() => setViewing(f)}
-                    className="rounded p-1 text-slate-400 hover:text-blue-500"
+                    onClick={(e) => { e.stopPropagation(); setViewing(f) }}
+                    className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-blue-400"
                     title="View 3D"
                   >
                     <Eye className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDownload(f.id)}
-                    className="rounded p-1 text-slate-400 hover:text-emerald-500"
+                    onClick={(e) => { e.stopPropagation(); handleDownload(f.id) }}
+                    className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-emerald-400"
                     title="Download"
                   >
                     <Download className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => setEditing(f)}
-                    className="rounded p-1 text-slate-400 hover:text-blue-500"
+                    onClick={(e) => { e.stopPropagation(); setEditing(f) }}
+                    className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-blue-400"
                     title="Edit"
                   >
                     <Edit3 className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(f.id)}
-                    className="rounded p-1 text-slate-400 hover:text-rose-500"
+                    onClick={(e) => { e.stopPropagation(); handleDelete(f.id) }}
+                    className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-rose-400"
                     title="Delete"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -215,28 +219,33 @@ export function STLFiles() {
                 </div>
               </div>
 
-              <div className="mt-2 flex items-center gap-3 text-xs text-slate-400">
-                <span>{formatSize(f.size)}</span>
-                <span>·</span>
-                <span>{formatDate(f.uploadedAt)}</span>
-              </div>
-
-              {f.tags && f.tags.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {f.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+              {/* File info */}
+              <div className="p-3">
+                <h3 className="truncate font-medium text-slate-900 dark:text-white">{f.name}</h3>
+                <p className="truncate text-xs text-slate-400">{f.filename}</p>
+                <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-400">
+                  <span>{formatSize(f.size)}</span>
+                  <span>·</span>
+                  <span>{formatDate(f.uploadedAt)}</span>
                 </div>
-              )}
 
-              {f.notes && (
-                <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{f.notes}</p>
-              )}
+                {f.tags && f.tags.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {f.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {f.notes && (
+                  <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{f.notes}</p>
+                )}
+              </div>
             </div>
           ))}
         </div>
