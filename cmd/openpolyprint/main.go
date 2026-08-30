@@ -2487,15 +2487,16 @@ func main() {
 			w.Write(data)
 		case http.MethodPut:
 			var body struct {
-				Name  string   `json:"name"`
-				Tags  []string `json:"tags"`
-				Notes string   `json:"notes"`
+				Name     string   `json:"name"`
+				Filename string   `json:"filename"`
+				Tags     []string `json:"tags"`
+				Notes    string   `json:"notes"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 				return
 			}
-			if !stlFilesStore.Update(id, body.Name, body.Tags, body.Notes) {
+			if !stlFilesStore.Update(id, body.Name, body.Filename, body.Tags, body.Notes) {
 				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 				return
 			}

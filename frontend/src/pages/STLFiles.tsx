@@ -450,6 +450,7 @@ function EditModal({
   onSaved: () => void
 }) {
   const [name, setName] = useState(file.name)
+  const [filename, setFilename] = useState(file.filename)
   const [tags, setTags] = useState((file.tags || []).join(', '))
   const [notes, setNotes] = useState(file.notes || '')
   const [saving, setSaving] = useState(false)
@@ -463,7 +464,7 @@ function EditModal({
     await fetch(`/api/stl-files/${file.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, tags: parsedTags, notes }),
+      body: JSON.stringify({ name, filename, tags: parsedTags, notes }),
     })
     setSaving(false)
     onSaved()
@@ -484,8 +485,12 @@ function EditModal({
         </div>
         <div className="space-y-4 p-6">
           <div>
-            <label className="mb-1 block text-xs text-slate-400">Name</label>
+            <label className="mb-1 block text-xs text-slate-400">Title</label>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Filename</label>
+            <input type="text" value={filename} onChange={(e) => setFilename(e.target.value)} className={inputClass} />
           </div>
           <div>
             <label className="mb-1 block text-xs text-slate-400">Tags (comma-separated)</label>

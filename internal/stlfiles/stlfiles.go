@@ -13,8 +13,8 @@ import (
 // STLFile is a stored STL (or OBJ) 3D model file.
 type STLFile struct {
 	ID         string   `json:"id"`
-	Name       string   `json:"name"`      // display name (user-editable)
-	Filename   string   `json:"filename"`  // original filename
+	Name       string   `json:"name"`     // display name (user-editable)
+	Filename   string   `json:"filename"` // original filename
 	Size       int64    `json:"size"`
 	Tags       []string `json:"tags"`
 	Notes      string   `json:"notes,omitempty"`
@@ -122,8 +122,8 @@ func (s *Store) Add(name, filename string, content []byte, tags []string, notes 
 	return f, nil
 }
 
-// Update modifies metadata (name, tags, notes) for an STL file.
-func (s *Store) Update(id string, name string, tags []string, notes string) bool {
+// Update modifies metadata (name, filename, tags, notes) for an STL file.
+func (s *Store) Update(id string, name string, filename string, tags []string, notes string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.files[id]
@@ -132,6 +132,9 @@ func (s *Store) Update(id string, name string, tags []string, notes string) bool
 	}
 	if name != "" {
 		f.Name = name
+	}
+	if filename != "" {
+		f.Filename = filename
 	}
 	f.Tags = tags
 	f.Notes = notes
