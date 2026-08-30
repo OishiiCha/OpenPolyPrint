@@ -84,12 +84,14 @@ export function STLFiles() {
     URL.revokeObjectURL(url)
   }
 
-  const handleUpload = async (file: File, tags: string, notes: string) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('tags', tags)
-    formData.append('notes', notes)
-    await fetch('/api/stl-files', { method: 'POST', body: formData })
+  const handleUpload = async (files: File[], tags: string, notes: string) => {
+    for (let i = 0; i < files.length; i++) {
+      const formData = new FormData()
+      formData.append('file', files[i])
+      formData.append('tags', tags)
+      formData.append('notes', notes)
+      await fetch('/api/stl-files', { method: 'POST', body: formData })
+    }
     fetchAll()
   }
 
@@ -279,20 +281,26 @@ function UploadModal({
   fileRef,
 }: {
   onClose: () => void
-  onUpload: (file: File, tags: string, notes: string) => Promise<void>
+  onUpload: (files: File[], tags: string, notes: string) => Promise<void>
   fileRef: React.RefObject<HTMLInputElement | null>
 }) {
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [tags, setTags] = useState('')
   const [notes, setNotes] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState({ current: 0, total: 0 })
 
   const handleUpload = async () => {
-    if (!file) return
+    if (files.length === 0) return
     setUploading(true)
-    await onUpload(file, tags, notes)
+    setProgress({ current: 0, total: files.length })
+    await onUpload(files, tags, notes)
     setUploading(false)
     onClose()
+  }
+
+  const removeFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx))
   }
 
   return (
@@ -312,26 +320,55 @@ function UploadModal({
             onClick={() => fileRef.current?.click()}
             className="cursor-pointer rounded-lg border-2 border-dashed border-slate-600 p-6 text-center transition-colors hover:border-blue-500"
           >
-            {file ? (
+            {files.length > 0 ? (
               <p className="text-sm text-slate-300">
-                {file.name} ({formatSize(file.size)})
+                {files.length} file{files.length !== 1 ? 's' : ''} selected · click to add more
               </p>
             ) : (
-              <p className="text-sm text-slate-500">Click to select an STL or OBJ file</p>
+              <p className="text-sm text-slate-500">Click to select STL / OBJ / 3MF files</p>
             )}
             <input
               ref={fileRef}
               type="file"
               accept=".stl,.obj,.3mf"
+              multiple
               className="hidden"
               onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) setFile(f)
+                const newFiles = Array.from(e.target.files || [])
+                if (newFiles.length > 0) {
+                  setFiles((prev) => [...prev, ...newFiles])
+                }
+                // Reset input so selecting the same file again still fires onChange
+                e.target.value = ''
               }}
             />
           </div>
+
+          {/* File list */}
+          {files.length > 0 && (
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg bg-slate-900 p-2">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 rounded px-2 py-1 text-xs">
+                  <Box className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                  <span className="min-w-0 flex-1 truncate text-slate-300">{f.name}</span>
+                  <span className="shrink-0 text-slate-500">{formatSize(f.size)}</span>
+                  {!uploading && (
+                    <button
+                      onClick={() => removeFile(i)}
+                      className="shrink-0 rounded p-0.5 text-slate-500 hover:text-rose-400"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div>
-            <label className="mb-1 block text-xs text-slate-400">Tags (comma-separated)</label>
+            <label className="mb-1 block text-xs text-slate-400">
+              Tags (comma-separated) — applied to all files
+            </label>
             <input
               type="text"
               value={tags}
@@ -341,25 +378,32 @@ function UploadModal({
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-slate-400">Notes</label>
+            <label className="mb-1 block text-xs text-slate-400">
+              Notes — applied to all files
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional notes about this model..."
+              placeholder="Optional notes about these models..."
               className={`${inputClass} h-20 resize-none`}
             />
           </div>
           <button
             onClick={handleUpload}
-            disabled={!file || uploading}
+            disabled={files.length === 0 || uploading}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
           >
             {uploading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Uploading... ({progress.current}/{progress.total})
+              </>
             ) : (
-              <Upload className="h-4 w-4" />
+              <>
+                <Upload className="h-4 w-4" />
+                Upload {files.length > 0 ? `${files.length} file${files.length !== 1 ? 's' : ''}` : ''}
+              </>
             )}
-            Upload
           </button>
         </div>
       </div>
