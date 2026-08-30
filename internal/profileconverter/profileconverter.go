@@ -27,7 +27,28 @@ type ConversionResult struct {
 	Unmapped []string `json:"unmapped"` // source keys with no mapping
 	Sections int      `json:"sections"` // number of sections in output
 	SavedID  string   `json:"savedId,omitempty"`
+	// For multi-profile conversions (e.g. flat INI → OrcaSlicer), this contains
+	// the individual profiles that can be selected and exported separately.
+	Profiles []ProfileOutput `json:"profiles,omitempty"`
 }
+
+// ProfileOutput is a single profile within a multi-profile conversion result.
+type ProfileOutput struct {
+	Type         ProfileType `json:"type"`
+	Name         string      `json:"name"`
+	Content      string      `json:"content"`
+	Filename     string      `json:"filename"`
+	SettingCount int         `json:"settingCount"`
+}
+
+// ProfileType identifies the kind of slicer profile.
+type ProfileType string
+
+const (
+	ProfileTypePrint    ProfileType = "print"
+	ProfileTypeFilament ProfileType = "filament"
+	ProfileTypePrinter  ProfileType = "printer"
+)
 
 // Convert detects the source format and converts to the target format.
 func Convert(content string, filename string, target Format) (*ConversionResult, error) {
@@ -1020,12 +1041,12 @@ func orcaSlicerToPrusaSlicer(content string, filename string) (*ConversionResult
 
 func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult, error) {
 	warnings := []string{}
-	unmapped := []string{}
 
 	// Parse PrusaSlicer INI — could be sectioned or flat
 	sections := parsePrusaSlicerINI(content)
 	allSettings := map[string]string{}
 	var profileName string
+	isFlat := false
 
 	if len(sections) > 0 {
 		for _, sec := range sections {
@@ -1038,6 +1059,7 @@ func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult
 		}
 	} else {
 		allSettings = parseFlatINI(content)
+		isFlat = true
 	}
 
 	if profileName == "" {
@@ -1047,7 +1069,13 @@ func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult
 		}
 	}
 
-	// Build JSON output
+	// For flat INI (eufyMake export), split into separate print/filament/printer
+	// profiles since OrcaSlicer expects separate JSON files for each type.
+	if isFlat {
+		return prusaSlicerFlatToOrcaSlicerMulti(allSettings, profileName, filename, warnings)
+	}
+
+	// For sectioned INI, produce a single JSON (existing behavior)
 	jsonMap := map[string]interface{}{
 		"from":              "OpenPolyPrint Converter",
 		"name":              profileName,
@@ -1060,18 +1088,7 @@ func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult
 		if isPSMetaKey(k) || isOrcaMetaKey(k) {
 			continue
 		}
-		// Try to convert string to number or bool for JSON
-		if v == "1" || v == "true" {
-			jsonMap[k] = true
-		} else if v == "0" || v == "false" {
-			jsonMap[k] = false
-		} else if i, err := strconv.Atoi(v); err == nil {
-			jsonMap[k] = i
-		} else if f, err := strconv.ParseFloat(v, 64); err == nil {
-			jsonMap[k] = f
-		} else {
-			jsonMap[k] = v
-		}
+		jsonMap[k] = stringToJSONValue(v)
 		mapped++
 	}
 
@@ -1084,18 +1101,307 @@ func prusaSlicerToOrcaSlicer(content string, filename string) (*ConversionResult
 		return nil, fmt.Errorf("failed to encode JSON: %w", err)
 	}
 
-	if len(unmapped) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d settings could not be mapped: %s", len(unmapped), strings.Join(unmapped, ", ")))
-	}
-
 	result := &ConversionResult{
 		Content:  string(jsonData),
 		Filename: strings.TrimSuffix(filename, filepathExt(filename)) + "_orcaslicer.json",
 		Format:   FormatOrcaSlicer,
 		Warnings: warnings,
-		Unmapped: unmapped,
 	}
 	return result, nil
+}
+
+// prusaSlicerFlatToOrcaSlicerMulti splits a flat INI (eufyMake/AnkerMake Studio
+// export) into separate OrcaSlicer JSON profiles for print, filament, and
+// printer settings. This is needed because OrcaSlicer imports separate JSON
+// files for each profile type, not a combined file.
+func prusaSlicerFlatToOrcaSlicerMulti(allSettings map[string]string, profileName, filename string, warnings []string) (*ConversionResult, error) {
+	printSettings, filamentSettings, printerSettings := categorizePrusaSlicerSettings(allSettings)
+
+	// Extract names from the settings if available
+	printName := profileName
+	if v, ok := allSettings["print_settings_id"]; ok && v != "" {
+		printName = v
+	}
+	filamentName := profileName
+	if v, ok := allSettings["filament_settings_id"]; ok && v != "" {
+		filamentName = v
+	} else if v, ok := allSettings["default_filament_profile"]; ok && v != "" {
+		filamentName = v
+	}
+	printerName := profileName
+	if v, ok := allSettings["printer_settings_id"]; ok && v != "" {
+		printerName = v
+	} else if v, ok := allSettings["printer_model"]; ok && v != "" {
+		printerName = v
+	}
+
+	baseFilename := strings.TrimSuffix(filename, filepathExt(filename))
+	var profiles []ProfileOutput
+
+	// Print profile
+	if len(printSettings) > 0 {
+		jsonMap := map[string]interface{}{
+			"from":              "OpenPolyPrint Converter",
+			"name":              printName,
+			"version":           "2.4.0.1",
+			"print_settings_id": printName,
+		}
+		for k, v := range printSettings {
+			if isPSMetaKey(k) || isOrcaMetaKey(k) {
+				continue
+			}
+			jsonMap[k] = stringToJSONValue(v)
+		}
+		jsonData, _ := json.MarshalIndent(jsonMap, "", "\t")
+		profiles = append(profiles, ProfileOutput{
+			Type:         ProfileTypePrint,
+			Name:         printName,
+			Content:      string(jsonData),
+			Filename:     baseFilename + "_print.json",
+			SettingCount: len(printSettings),
+		})
+	}
+
+	// Filament profile
+	if len(filamentSettings) > 0 {
+		jsonMap := map[string]interface{}{
+			"from":                 "OpenPolyPrint Converter",
+			"name":                 filamentName,
+			"version":              "2.4.0.1",
+			"filament_settings_id": filamentName,
+		}
+		for k, v := range filamentSettings {
+			if isPSMetaKey(k) || isOrcaMetaKey(k) {
+				continue
+			}
+			jsonMap[k] = stringToJSONValue(v)
+		}
+		jsonData, _ := json.MarshalIndent(jsonMap, "", "\t")
+		profiles = append(profiles, ProfileOutput{
+			Type:         ProfileTypeFilament,
+			Name:         filamentName,
+			Content:      string(jsonData),
+			Filename:     baseFilename + "_filament.json",
+			SettingCount: len(filamentSettings),
+		})
+	}
+
+	// Printer profile
+	if len(printerSettings) > 0 {
+		jsonMap := map[string]interface{}{
+			"from":                "OpenPolyPrint Converter",
+			"name":                printerName,
+			"version":             "2.4.0.1",
+			"printer_settings_id": printerName,
+		}
+		for k, v := range printerSettings {
+			if isPSMetaKey(k) || isOrcaMetaKey(k) {
+				continue
+			}
+			jsonMap[k] = stringToJSONValue(v)
+		}
+		jsonData, _ := json.MarshalIndent(jsonMap, "", "\t")
+		profiles = append(profiles, ProfileOutput{
+			Type:         ProfileTypePrinter,
+			Name:         printerName,
+			Content:      string(jsonData),
+			Filename:     baseFilename + "_printer.json",
+			SettingCount: len(printerSettings),
+		})
+	}
+
+	if len(profiles) == 0 {
+		warnings = append(warnings, "No settings found to split into profiles.")
+	} else {
+		warnings = append(warnings, fmt.Sprintf("Split into %d profiles: %s. Import each JSON file separately in OrcaSlicer (File → Import → Import config).", len(profiles), profileTypesSummary(profiles)))
+	}
+
+	// Use the first profile as the default content for backwards compat
+	defaultContent := ""
+	defaultFilename := baseFilename + "_orcaslicer.json"
+	if len(profiles) > 0 {
+		defaultContent = profiles[0].Content
+		defaultFilename = profiles[0].Filename
+	}
+
+	return &ConversionResult{
+		Content:  defaultContent,
+		Filename: defaultFilename,
+		Format:   FormatOrcaSlicer,
+		Warnings: warnings,
+		Profiles: profiles,
+	}, nil
+}
+
+// categorizePrusaSlicerSettings splits a flat map of PrusaSlicer settings into
+// print, filament, and printer categories based on key name prefixes and
+// known setting categorizations from PrusaSlicer/OrcaSlicer source.
+func categorizePrusaSlicerSettings(all map[string]string) (print, filament, printer map[string]string) {
+	print = map[string]string{}
+	filament = map[string]string{}
+	printer = map[string]string{}
+
+	for k, v := range all {
+		cat := categorizeSetting(k)
+		switch cat {
+		case "filament":
+			filament[k] = v
+		case "printer":
+			printer[k] = v
+		default:
+			print[k] = v
+		}
+	}
+	return
+}
+
+// categorizeSetting determines which profile type a PrusaSlicer setting belongs to.
+// Based on PrusaSlicer/OrcaSlicer setting category definitions.
+func categorizeSetting(key string) string {
+	// Filament settings — prefixed with filament_ or related to material/temperature
+	filamentPrefixes := []string{
+		"filament_", "default_filament_profile",
+	}
+	filamentExact := map[string]bool{
+		"temperature": true, "bed_temperature": true,
+		"first_layer_temperature": true, "first_layer_bed_temperature": true,
+		"cooling": true, "max_fan_speed": true, "min_fan_speed": true,
+		"disable_fan_first_layers": true, "fan_always_on": true,
+		"fan_below_layer_time": true, "bridge_fan_speed": true,
+		"full_fan_speed_layer": true, "enable_dynamic_fan_speeds": true,
+		"overhang_fan_speed_0": true, "overhang_fan_speed_1": true,
+		"overhang_fan_speed_2": true, "overhang_fan_speed_3": true,
+		"idle_temperature": true, "standby_temperature_delta": true,
+		"high_current_on_filament_swap": true,
+		"autoemit_temperature_commands": true,
+		"filament_cooling_final_speed":  true, "filament_cooling_initial_speed": true,
+		"filament_cooling_moves": true, "filament_load_time": true,
+		"filament_loading_speed": true, "filament_loading_speed_start": true,
+		"filament_unload_time": true, "filament_unloading_speed": true,
+		"filament_unloading_speed_start": true,
+		"filament_max_volumetric_speed":  true, "filament_minimal_purge_on_wipe_tower": true,
+		"filament_ramming_parameters": true, "filament_retract_before_travel": true,
+		"filament_retract_before_wipe": true, "filament_retract_layer_change": true,
+		"filament_retract_length": true, "filament_retract_lift": true,
+		"filament_retract_lift_above": true, "filament_retract_lift_below": true,
+		"filament_retract_restart_extra": true, "filament_retract_speed": true,
+		"filament_soluble": true, "filament_spool_weight": true,
+		"filament_toolchange_delay": true, "filament_wipe": true,
+		"filament_deretract_speed": true, "filament_cost": true,
+		"filament_density": true, "filament_colour": true,
+		"filament_notes": true, "filament_vendor": true,
+		"filament_settings_id": true, "end_filament_gcode": true,
+		"start_filament_gcode": true,
+		"extruder_colour":      true, "extruder_offset": true,
+		"max_volumetric_speed": true, "max_volumetric_extrusion_rate_slope_negative": true,
+		"max_volumetric_extrusion_rate_slope_positive": true,
+		"single_extruder_multi_material":               true, "single_extruder_multi_material_priming": true,
+		"extrusion_multiplier": true,
+	}
+
+	// Printer settings — prefixed with machine_, printer_, or related to hardware
+	printerPrefixes := []string{
+		"machine_", "printer_", "bed_", "nozzle_",
+	}
+	printerExact := map[string]bool{
+		"bed_shape": true, "bed_custom_model": true, "bed_custom_texture": true,
+		"max_print_height": true, "nozzle_diameter": true,
+		"printer_model": true, "printer_vendor": true, "printer_technology": true,
+		"printer_variant": true, "printer_settings_id": true,
+		"printer_notes": true, "physical_printer_settings_id": true,
+		"gcode_flavor": true, "gcode_resolution": true, "gcode_substitutions": true,
+		"gcode_comments": true, "gcode_label_objects": true,
+		"start_gcode": true, "end_gcode": true,
+		"before_layer_gcode": true, "layer_gcode": true,
+		"toolchange_gcode": true, "between_objects_gcode": true,
+		"color_change_gcode": true, "pause_print_gcode": true,
+		"template_custom_gcode":     true,
+		"extruder_clearance_height": true, "extruder_clearance_radius": true,
+		"extrusion_axis": true, "extruder_count": true,
+		"use_firmware_retraction": true, "use_relative_e_distances": true,
+		"use_volumetric_e": true, "variable_layer_height": true,
+		"silent_mode": true, "remaining_times": true,
+		"host_type": true, "print_host": true,
+		"printhost_apikey": true, "printhost_cafile": true,
+		"thumbnails": true, "thumbnails_format": true,
+		"output_filename_format": true,
+		"default_print_profile":  true,
+		"threads":                true, "z_offset": true,
+		"xy_hole_compensation": true, "xy_size_compensation": true,
+		"hole_offset": true, "elefant_foot_compensation": true,
+		"lift_type": true, "travel_speed_z": true,
+		"machine_limits_usage": true,
+		"slice_closing_radius": true, "slicing_mode": true,
+		"mmu_segmented_region_max_width": true,
+		"parking_pos_retraction":         true,
+		"wiping_volumes_extruders":       true, "wiping_volumes_matrix": true,
+		"compatible_printers_condition_cummulative": true,
+		"compatible_prints_condition_cummulative":   true,
+		"inherits_cummulative":                      true,
+		"notes":                                     true,
+		"colorprint_heights":                        true,
+		"post_process":                              true,
+		"enable_arc_fitting":                        true,
+		"make_overhang_printable":                   true, "make_overhang_printable_angle": true,
+		"make_overhang_printable_hole_size": true,
+		"slow_down_layers":                  true,
+		"jerk_enable":                       true, "jerk_first_layer": true,
+		"jerk_infill": true, "jerk_inner_wall": true, "jerk_outer_wall": true,
+		"jerk_print": true, "jerk_skirt_brim": true, "jerk_top_bottom": true,
+		"jerk_top_surface": true, "jerk_travel": true,
+		"jerk_e_enable": true, "jerk_e_infill": true, "jerk_e_inner_wall": true,
+		"jerk_e_outer_wall": true, "jerk_e_print": true, "jerk_e_skin": true,
+		"jerk_e_skirt_brim": true, "jerk_e_support": true,
+	}
+
+	// Check filament
+	for _, prefix := range filamentPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return "filament"
+		}
+	}
+	if filamentExact[key] {
+		return "filament"
+	}
+
+	// Check printer
+	for _, prefix := range printerPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return "printer"
+		}
+	}
+	if printerExact[key] {
+		return "printer"
+	}
+
+	// Everything else is a print setting
+	return "print"
+}
+
+// stringToJSONValue converts a string value to the appropriate JSON type
+// (bool, int, float, or string).
+func stringToJSONValue(v string) interface{} {
+	if v == "1" || v == "true" {
+		return true
+	}
+	if v == "0" || v == "false" {
+		return false
+	}
+	if i, err := strconv.Atoi(v); err == nil {
+		return i
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil {
+		return f
+	}
+	return v
+}
+
+func profileTypesSummary(profiles []ProfileOutput) string {
+	parts := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		parts = append(parts, string(p.Type))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func orcaSlicerToCura(content string, filename string) (*ConversionResult, error) {

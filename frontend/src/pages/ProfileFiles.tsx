@@ -576,6 +576,14 @@ function EditModal({ file, onClose, onSaved }: { file: ProfileFile; onClose: () 
   )
 }
 
+interface ProfileOutput {
+  type: 'print' | 'filament' | 'printer'
+  name: string
+  content: string
+  filename: string
+  settingCount: number
+}
+
 interface ConversionResult {
   content: string
   filename: string
@@ -584,6 +592,7 @@ interface ConversionResult {
   unmapped: string[]
   sections: number
   savedId?: string
+  profiles?: ProfileOutput[]
 }
 
 function ConvertModal({ file, category, onClose, onConverted }: {
@@ -651,6 +660,23 @@ function ConvertModal({ file, category, onClose, onConverted }: {
     a.download = result.filename
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadProfile = (profile: ProfileOutput) => {
+    const blob = new Blob([profile.content], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = profile.filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadAllProfiles = () => {
+    if (!result?.profiles) return
+    result.profiles.forEach((p, i) => {
+      setTimeout(() => handleDownloadProfile(p), i * 200)
+    })
   }
 
   return (
@@ -774,20 +800,75 @@ function ConvertModal({ file, category, onClose, onConverted }: {
                 )}
               </div>
 
-              <div className="rounded-lg bg-slate-900 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">Output: {result.filename}</span>
-                  <button
-                    onClick={handleDownloadResult}
-                    className="flex items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600"
-                  >
-                    <Download className="h-3 w-3" /> download
-                  </button>
+              {/* Multi-profile output (e.g. flat INI → OrcaSlicer) */}
+              {result.profiles && result.profiles.length > 0 && (
+                <div className="rounded-lg border border-purple-700/50 bg-purple-900/10 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-purple-300">Profiles to import</h4>
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Import each file separately in OrcaSlicer: File → Import → Import config
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleDownloadAllProfiles}
+                      className="flex items-center gap-1 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-500"
+                    >
+                      <Download className="h-3.5 w-3.5" /> download all
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {result.profiles.map((p, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-lg bg-slate-900 p-3">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                          p.type === 'print' ? 'bg-blue-900/50 text-blue-300' :
+                          p.type === 'filament' ? 'bg-amber-900/50 text-amber-300' :
+                          'bg-emerald-900/50 text-emerald-300'
+                        }`}>
+                          {p.type === 'print' ? 'P' : p.type === 'filament' ? 'F' : 'R'}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-200">{p.name}</span>
+                            <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-0.5 text-[9px] text-slate-400">
+                              {p.type}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+                            <span>{p.settingCount} settings</span>
+                            <span>·</span>
+                            <code className="truncate">{p.filename}</code>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleDownloadProfile(p)}
+                          className="flex shrink-0 items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600"
+                        >
+                          <Download className="h-3 w-3" /> download
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <pre className="max-h-48 overflow-auto rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300">
-                  {result.content.slice(0, 2000)}{result.content.length > 2000 ? '\n... (truncated)' : ''}
-                </pre>
-              </div>
+              )}
+
+              {/* Single file output (when no multi-profile) */}
+              {(!result.profiles || result.profiles.length === 0) && (
+                <div className="rounded-lg bg-slate-900 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-xs text-slate-400">Output: {result.filename}</span>
+                    <button
+                      onClick={handleDownloadResult}
+                      className="flex items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600"
+                    >
+                      <Download className="h-3 w-3" /> download
+                    </button>
+                  </div>
+                  <pre className="max-h-48 overflow-auto rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300">
+                    {result.content.slice(0, 2000)}{result.content.length > 2000 ? '\n... (truncated)' : ''}
+                  </pre>
+                </div>
+              )}
 
               {result.warnings.length > 0 && (
                 <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-3">
