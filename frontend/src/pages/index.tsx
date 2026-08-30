@@ -3715,13 +3715,48 @@ function OrcaSlicerSetup({ printers }: { printers: Printer[] }) {
 
   return (
     <div className="mb-6 space-y-4">
-      {/* Per-printer upload URLs — front and center */}
-      {printers.length > 0 ? (
+      {/* API URL — front and center, just like OpenMake */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+        <h4 className="mb-1 font-mono text-sm font-semibold text-slate-200">API URL</h4>
+        <p className="mb-3 font-mono text-[11px] text-slate-500">
+          Use this URL in OrcaSlicer's Physical Printer settings. Uploads go to the
+          printer set in "Slicer upload target" below, or the first available printer.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 truncate rounded bg-slate-800 px-3 py-2 font-mono text-sm text-blue-300">{baseUrl}</code>
+          <CopyButton text={baseUrl} />
+        </div>
+      </div>
+
+      {/* Quick setup */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+        <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">How to set up in OrcaSlicer</h4>
+        <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
+          <li>Open OrcaSlicer → Settings → Physical Printers → Add</li>
+          <li>Set Host Type to <span className="text-slate-300">Octo/Klipper</span></li>
+          <li>
+            Paste the API URL above into the
+            <span className="text-slate-300"> Hostname / IP </span>
+            field
+          </li>
+          <li>Leave the API key field blank (OpenPolyPrint doesn't require one)</li>
+          <li>Click Test — you should see "OctoPrint 1.9.0 detected"</li>
+          <li>
+            Set the target printer in OpenPolyPrint → Settings → Slicer upload target.
+            Uploads from OrcaSlicer will go to this printer.
+          </li>
+        </ol>
+      </div>
+
+      {/* Per-printer URLs (optional advanced) */}
+      {printers.length > 0 && (
         <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
-          <h4 className="mb-1 font-mono text-sm font-semibold text-slate-200">Printer upload URLs</h4>
+          <h4 className="mb-1 font-mono text-sm font-semibold text-slate-200">
+            Per-printer URLs <span className="text-slate-500">(optional)</span>
+          </h4>
           <p className="mb-3 font-mono text-[11px] text-slate-500">
-            Each printer has its own URL. In OrcaSlicer, create a Physical Printer for each one
-            and paste the URL below as the API URL.
+            To upload to a specific printer instead of the default target, use one of these URLs
+            as the Hostname/IP in a separate Physical Printer entry.
           </p>
           <div className="space-y-2">
             {printers.map((p) => {
@@ -3742,41 +3777,12 @@ function OrcaSlicerSetup({ printers }: { printers: Printer[] }) {
             })}
           </div>
         </div>
-      ) : (
-        <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
-          <p className="font-mono text-xs text-slate-400">
-            No printers configured. Add a printer first, then come back here to get the upload URL.
-          </p>
-        </div>
       )}
 
-      {/* Quick setup */}
-      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
-        <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">How to use in OrcaSlicer</h4>
-        <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
-          <li>Open OrcaSlicer → Settings → Physical Printers → Add</li>
-          <li>
-            Set Host Type to <span className="text-slate-300">Octo/Klipper</span>
-          </li>
-          <li>
-            Paste the printer URL from above into the
-            <span className="text-slate-300"> Hostname / IP </span>
-            field (the full URL including <code className="text-blue-300">/api/files/...</code>)
-          </li>
-          <li>Leave the API key field blank (OpenPolyPrint doesn't require one)</li>
-          <li>Click Test — you should see "OctoPrint 1.9.0 detected"</li>
-          <li>Upload G-code from OrcaSlicer — it will be sent to the specified printer via PPPP</li>
-        </ol>
-      </div>
-
-      {/* OrcaSlicer-specific tips */}
+      {/* Tips */}
       <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
         <h4 className="mb-2 font-mono text-sm font-semibold text-slate-200">Tips</h4>
         <ul className="ml-4 list-disc space-y-1.5 font-mono text-xs text-slate-400">
-          <li>
-            <span className="text-slate-300">Multiple printers:</span> Create a separate Physical Printer
-            in OrcaSlicer for each OpenPolyPrint printer, each with its own URL from above.
-          </li>
           <li>
             <span className="text-slate-300">HTTPS:</span> If OpenPolyPrint uses HTTPS with a self-signed
             certificate, install the CA on your machine first (Settings → HTTPS → Install CA) so OrcaSlicer
@@ -3784,7 +3790,7 @@ function OrcaSlicerSetup({ printers }: { printers: Printer[] }) {
           </li>
           <li>
             <span className="text-slate-300">Remote access (Tailscale):</span> Access this page via the
-            Tailscale IP or MagicDNS name, and the URLs above will automatically use that address.
+            Tailscale IP or MagicDNS name, and the URL above will automatically use that address.
             Both the slicer PC and OpenPolyPrint must be on the same tailnet.
           </li>
         </ul>
@@ -4379,16 +4385,18 @@ export function Settings() {
         <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            Slicers must specify a printer in the upload URL. Use the per-printer URLs shown in the
-            integration settings (e.g. OrcaSlicer setup). This setting is only used as a fallback
-            for slicers that don't support per-printer URLs.
+            When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the standard OctoPrint
+            API (<code className="mx-1 rounded bg-slate-100 px-1 dark:bg-slate-800">/api/files/local</code>),
+            it goes to this printer. To upload to a specific printer, use
+            <code className="mx-1 rounded bg-slate-100 px-1 dark:bg-slate-800">/api/files/{"{printer_name}"}/local</code>
+            as the URL instead.
           </p>
           <select
             value={config.slicerTarget}
             onChange={(e) => update({ slicerTarget: e.target.value })}
             className={inputClass}
           >
-            <option value="">— None (require explicit printer) —</option>
+            <option value="">Auto (first available printer)</option>
             {printers.map((p) => (
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}

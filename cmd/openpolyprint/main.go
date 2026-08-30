@@ -1808,12 +1808,27 @@ func main() {
 	}))
 
 	mux.HandleFunc("/api/printer", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		// Printer is specified via ?printer= query parameter
+		// Printer is specified via ?printer= query parameter, or falls back
+		// to the slicer target, then first available printer.
 		printerName := r.URL.Query().Get("printer")
 		var status printers.Status
 		if printerName != "" {
 			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
 				status, _ = d.Status()
+			}
+		}
+		if status.ID == "" {
+			target := loadSlicerTarget(settingsFile)
+			if target != "" {
+				if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
+					status, _ = d.Status()
+				}
+			}
+		}
+		if status.ID == "" {
+			statuses := mgr.Load().Statuses()
+			if len(statuses) > 0 {
+				status = statuses[0]
 			}
 		}
 		stateText := "Offline"
@@ -1856,6 +1871,20 @@ func main() {
 		if printerName != "" {
 			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
 				status, _ = d.Status()
+			}
+		}
+		if status.ID == "" {
+			target := loadSlicerTarget(settingsFile)
+			if target != "" {
+				if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
+					status, _ = d.Status()
+				}
+			}
+		}
+		if status.ID == "" {
+			statuses := mgr.Load().Statuses()
+			if len(statuses) > 0 {
+				status = statuses[0]
 			}
 		}
 		stateText := "Offline"
@@ -1981,24 +2010,34 @@ func main() {
 				return
 			}
 
-			// Resolve target printer — a printer name is always required.
+			// Resolve target printer.
+			// 1. If printer name is in the URL path, use that.
+			// 2. Otherwise, use the configured slicer target.
+			// 3. Otherwise, fall back to the first available printer.
+			// This matches the standard OctoPrint API where /api/files/local
+			// uploads to the connected printer.
 			m := mgr.Load()
 			var driver printers.Driver
 			if printerName != "" {
 				driver = findPrinterByNameOrAlias(m, printerName)
 			}
 			if driver == nil {
-				// No printer specified or not found — return an error with the
-				// list of available printers so the slicer/user can pick one.
-				available := make([]string, 0, len(m.Drivers()))
-				for _, d := range m.Drivers() {
-					available = append(available, d.Name())
+				target := loadSlicerTarget(settingsFile)
+				if target != "" {
+					driver = findPrinterByNameOrAlias(m, target)
 				}
+			}
+			if driver == nil {
+				for _, d := range m.Drivers() {
+					driver = d
+					break
+				}
+			}
+			if driver == nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error":    "printer not specified or not found. Use /api/files/{printer_name}/local to upload to a specific printer.",
-					"printers": available,
+					"error": "no printer available",
 				})
 				return
 			}
