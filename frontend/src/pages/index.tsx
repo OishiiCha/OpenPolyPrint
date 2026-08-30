@@ -4309,11 +4309,12 @@ export function Settings() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {([
               { to: '/gcode', label: 'G-code' },
-              { to: '/queue', label: 'Queue' },
+              { to: '/queue', label: 'Print Queue' },
               { to: '/filament', label: 'Filament' },
               { to: '/profiles', label: 'Profiles' },
               { to: '/profile-files', label: 'Profile Files' },
-              { to: '/plugs', label: 'Plugs' },
+              { to: '/stl-files', label: 'STL Library' },
+              { to: '/plugs', label: 'Smart Plugs' },
               { to: '/analysis', label: 'Analysis' },
               { to: '/cameras', label: 'Cameras' },
               { to: '/recordings', label: 'Recordings' },

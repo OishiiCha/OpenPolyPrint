@@ -24,27 +24,75 @@ import {
   Gauge,
   Menu,
   X,
+  ChevronDown,
+  FolderClosed,
+  Activity,
+  Server,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { AIChatPane } from './AIChatSidebar'
 
-const navItems = [
+// Nav items can be either top-level links or collapsible groups.
+type NavItem = {
+  to: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  /** If set, this item is a conditional item (only shown when flag is true) */
+  showWhen?: (cfg: ReturnType<typeof loadConfig>) => boolean
+}
+type NavGroup = {
+  group: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  children: NavItem[]
+}
+type NavEntry = NavItem | NavGroup
+
+const navItems: NavEntry[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/printers', label: 'Printers', icon: Printer },
-  { to: '/gcode', label: 'G-code', icon: FileCode2 },
-  { to: '/queue', label: 'Queue', icon: ListOrdered },
-  { to: '/filament', label: 'Filament', icon: Package },
-  { to: '/profiles', label: 'Profiles', icon: Gauge },
-  { to: '/profile-files', label: 'Profile Files', icon: Files },
-  { to: '/stl-files', label: 'STL Library', icon: Box },
-  { to: '/plugs', label: 'Plugs', icon: PlugIcon },
-  { to: '/analysis', label: 'Analysis', icon: Sparkles },
-  { to: '/cameras', label: 'Cameras', icon: Video },
-  { to: '/recordings', label: 'Recordings', icon: Film },
-  { to: '/pi', label: 'Pi', icon: Cpu },
-  { to: '/history', label: 'History', icon: History },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/terminal', label: 'Terminal', icon: Terminal },
+  {
+    group: 'printers',
+    label: 'Printers',
+    icon: Printer,
+    children: [
+      { to: '/printers', label: 'Printers', icon: Printer },
+      { to: '/queue', label: 'Print Queue', icon: ListOrdered },
+      { to: '/filament', label: 'Filament', icon: Package },
+      { to: '/profiles', label: 'Profiles', icon: Gauge },
+    ],
+  },
+  {
+    group: 'files',
+    label: 'Files',
+    icon: FolderClosed,
+    children: [
+      { to: '/gcode', label: 'G-code', icon: FileCode2 },
+      { to: '/profile-files', label: 'Profile Files', icon: Files },
+      { to: '/stl-files', label: 'STL Library', icon: Box },
+    ],
+  },
+  {
+    group: 'monitoring',
+    label: 'Monitoring',
+    icon: Activity,
+    children: [
+      { to: '/cameras', label: 'Cameras', icon: Video },
+      { to: '/recordings', label: 'Recordings', icon: Film },
+      { to: '/history', label: 'History', icon: History },
+      { to: '/analytics', label: 'Analytics', icon: BarChart3, showWhen: (c) => c.analyticsEnabled },
+      { to: '/analysis', label: 'Analysis', icon: Sparkles, showWhen: (c) => c.geminiEnabled },
+    ],
+  },
+  {
+    group: 'system',
+    label: 'System',
+    icon: Server,
+    children: [
+      { to: '/pi', label: 'Pi', icon: Cpu },
+      { to: '/plugs', label: 'Smart Plugs', icon: PlugIcon },
+      { to: '/terminal', label: 'Terminal', icon: Terminal },
+    ],
+  },
   { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/help', label: 'Help', icon: HelpCircle },
 ]
@@ -124,13 +172,28 @@ export function Layout() {
   const [theme, setTheme] = useState(() => loadConfig().theme)
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
   const [geminiEnabled, setGeminiEnabled] = useState(() => loadConfig().geminiEnabled)
-  const [analyticsEnabled, setAnalyticsEnabled] = useState(() => loadConfig().analyticsEnabled)
   const [hiddenNavItems, setHiddenNavItems] = useState<string[]>(() => loadConfig().hiddenNavItems ?? [])
   const [chatCollapsed, setChatCollapsed] = useState(() => {
     try { return localStorage.getItem('aiChatCollapsed') === 'true' } catch { return false }
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+
+  // Collapsed state for nav groups — persisted in localStorage
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem('navCollapsedGroups')
+      return stored ? JSON.parse(stored) : {}
+    } catch { return {} }
+  })
+
+  const toggleGroup = (group: string) => {
+    setCollapsedGroups((prev) => {
+      const next = { ...prev, [group]: !prev[group] }
+      try { localStorage.setItem('navCollapsedGroups', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
 
   const toggleChat = () => {
     const next = !chatCollapsed
@@ -142,6 +205,18 @@ export function Layout() {
   useEffect(() => {
     setSidebarOpen(false)
   }, [location.pathname])
+
+  // Check if a path is within a group (for auto-expand and active state)
+  const isPathInGroup = (group: NavGroup, path: string) =>
+    group.children.some((child) => path === child.to || path.startsWith(child.to + '/'))
+
+  // Filter out hidden nav items and conditional items
+  const cfg = loadConfig()
+  const visibleChildren = (group: NavGroup) =>
+    group.children.filter((child) =>
+      !hiddenNavItems.includes(child.to) &&
+      (!child.showWhen || child.showWhen(cfg))
+    )
 
   useEffect(() => {
     const el = document.documentElement
@@ -160,7 +235,6 @@ export function Layout() {
       setTheme(cfg.theme)
       setShowMini(cfg.showMiniTerminal)
       setGeminiEnabled(cfg.geminiEnabled)
-      setAnalyticsEnabled(cfg.analyticsEnabled)
       setHiddenNavItems(cfg.hiddenNavItems ?? [])
     }
     window.addEventListener('openpolyprint-config-updated', handler)
@@ -194,27 +268,75 @@ export function Layout() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-          {navItems.filter((item) =>
-            (item.to !== '/analysis' || geminiEnabled) &&
-            (item.to !== '/analytics' || analyticsEnabled) &&
-            !hiddenNavItems.includes(item.to)
-          ).map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800'
-                }`
-              }
-            >
-              <item.icon className="h-5 w-5 shrink-0" />
-              <span className="truncate">{item.label}</span>
-            </NavLink>
-          ))}
+          {navItems.map((entry) => {
+            // Top-level link
+            if ('to' in entry) {
+              if (entry.showWhen && !entry.showWhen(cfg)) return null
+              if (hiddenNavItems.includes(entry.to)) return null
+              return (
+                <NavLink
+                  key={entry.to}
+                  to={entry.to}
+                  end={entry.to === '/'}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800'
+                    }`
+                  }
+                >
+                  <entry.icon className="h-5 w-5 shrink-0" />
+                  <span className="truncate">{entry.label}</span>
+                </NavLink>
+              )
+            }
+
+            // Collapsible group
+            const children = visibleChildren(entry)
+            if (children.length === 0) return null
+            const isCollapsed = collapsedGroups[entry.group] ?? false
+            const hasActiveChild = isPathInGroup(entry, location.pathname)
+
+            return (
+              <div key={entry.group}>
+                <button
+                  onClick={() => toggleGroup(entry.group)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    hasActiveChild && isCollapsed
+                      ? 'bg-blue-600/20 text-blue-600 dark:text-blue-400'
+                      : 'text-slate-600 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <entry.icon className="h-5 w-5 shrink-0" />
+                  <span className="flex-1 truncate text-left">{entry.label}</span>
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+                  />
+                </button>
+                {!isCollapsed && (
+                  <div className="mt-0.5 ml-4 space-y-0.5 border-l border-slate-200 pl-3 dark:border-slate-700">
+                    {children.map((child) => (
+                      <NavLink
+                        key={child.to}
+                        to={child.to}
+                        className={({ isActive }) =>
+                          `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+                            isActive
+                              ? 'bg-blue-600 font-medium text-white'
+                              : 'text-slate-500 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800'
+                          }`
+                        }
+                      >
+                        <child.icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{child.label}</span>
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </nav>
 
         {showMini && <MiniTerminal />}
