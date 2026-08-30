@@ -4297,6 +4297,52 @@ export function Settings() {
           </div>
         </Card>
         <Card>
+          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Sidebar pages</h3>
+          <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
+            Hide pages you don't use from the sidebar. Dashboard, Printers, and Settings are always shown.
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {([
+              { to: '/gcode', label: 'G-code' },
+              { to: '/queue', label: 'Queue' },
+              { to: '/filament', label: 'Filament' },
+              { to: '/profiles', label: 'Profiles' },
+              { to: '/plugs', label: 'Plugs' },
+              { to: '/analysis', label: 'Analysis' },
+              { to: '/cameras', label: 'Cameras' },
+              { to: '/recordings', label: 'Recordings' },
+              { to: '/pi', label: 'Pi' },
+              { to: '/history', label: 'History' },
+              { to: '/analytics', label: 'Analytics' },
+              { to: '/terminal', label: 'Terminal' },
+              { to: '/help', label: 'Help' },
+            ]).map((item) => {
+              const hidden = (config.hiddenNavItems ?? []).includes(item.to)
+              return (
+                <label
+                  key={item.to}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-300"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hidden}
+                    onChange={(e) => {
+                      const current = config.hiddenNavItems ?? []
+                      if (e.target.checked) {
+                        update({ hiddenNavItems: current.filter((p) => p !== item.to) })
+                      } else {
+                        update({ hiddenNavItems: [...current, item.to] })
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  {item.label}
+                </label>
+              )
+            })}
+          </div>
+        </Card>
+        <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
             When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the OctoPrint API,

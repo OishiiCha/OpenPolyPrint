@@ -29,6 +29,8 @@ export interface AppConfig {
   authPasscode: string
   notifyFinished: boolean
   notifyFailed: boolean
+  /** Sidebar pages the user has hidden. Keyed by nav path (e.g. "/filament"). */
+  hiddenNavItems: string[]
   providers: {
     anker: ProviderConfig
     flashforge: ProviderConfig
@@ -78,6 +80,7 @@ export function defaultConfig(): AppConfig {
     authPasscode: '',
     notifyFinished: true,
     notifyFailed: true,
+    hiddenNavItems: [],
     providers: {
       anker: defaultProvider(),
       flashforge: defaultProvider(),

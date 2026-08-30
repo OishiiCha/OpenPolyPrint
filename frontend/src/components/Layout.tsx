@@ -121,6 +121,7 @@ export function Layout() {
   const [showMini, setShowMini] = useState(() => loadConfig().showMiniTerminal)
   const [geminiEnabled, setGeminiEnabled] = useState(() => loadConfig().geminiEnabled)
   const [analyticsEnabled, setAnalyticsEnabled] = useState(() => loadConfig().analyticsEnabled)
+  const [hiddenNavItems, setHiddenNavItems] = useState<string[]>(() => loadConfig().hiddenNavItems ?? [])
   const [chatCollapsed, setChatCollapsed] = useState(() => {
     try { return localStorage.getItem('aiChatCollapsed') === 'true' } catch { return false }
   })
@@ -156,6 +157,7 @@ export function Layout() {
       setShowMini(cfg.showMiniTerminal)
       setGeminiEnabled(cfg.geminiEnabled)
       setAnalyticsEnabled(cfg.analyticsEnabled)
+      setHiddenNavItems(cfg.hiddenNavItems ?? [])
     }
     window.addEventListener('openpolyprint-config-updated', handler)
     return () => window.removeEventListener('openpolyprint-config-updated', handler)
@@ -190,7 +192,8 @@ export function Layout() {
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
           {navItems.filter((item) =>
             (item.to !== '/analysis' || geminiEnabled) &&
-            (item.to !== '/analytics' || analyticsEnabled)
+            (item.to !== '/analytics' || analyticsEnabled) &&
+            !hiddenNavItems.includes(item.to)
           ).map((item) => (
             <NavLink
               key={item.to}
