@@ -1769,6 +1769,27 @@ func main() {
 		})
 	}))
 
+	// /api/login — OctoPrint passive login. Always returns success with no
+	// session since OpenPolyPrint doesn't require API keys for slicer uploads.
+	mux.HandleFunc("/api/login", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"_is_external_client": true,
+			"session":             "openpolyprint",
+			"username":            "openpolyprint",
+		})
+	}))
+
+	// /api/printerprofiles — return a default profile
+	mux.HandleFunc("/api/printerprofiles", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"profiles": []map[string]any{
+				{"id": "default", "name": "OpenPolyPrint", "default": true},
+			},
+		})
+	}))
+
 	mux.HandleFunc("/api/connection", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
@@ -1787,17 +1808,12 @@ func main() {
 	}))
 
 	mux.HandleFunc("/api/printer", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		target := loadSlicerTarget(settingsFile)
+		// Printer is specified via ?printer= query parameter
+		printerName := r.URL.Query().Get("printer")
 		var status printers.Status
-		if target != "" {
-			if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
+		if printerName != "" {
+			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
 				status, _ = d.Status()
-			}
-		}
-		if status.ID == "" {
-			statuses := mgr.Load().Statuses()
-			if len(statuses) > 0 {
-				status = statuses[0]
 			}
 		}
 		stateText := "Offline"
@@ -1822,17 +1838,11 @@ func main() {
 	}))
 
 	mux.HandleFunc("/api/job", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		target := loadSlicerTarget(settingsFile)
+		printerName := r.URL.Query().Get("printer")
 		var status printers.Status
-		if target != "" {
-			if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
+		if printerName != "" {
+			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
 				status, _ = d.Status()
-			}
-		}
-		if status.ID == "" {
-			statuses := mgr.Load().Statuses()
-			if len(statuses) > 0 {
-				status = statuses[0]
 			}
 		}
 		stateText := "Offline"
@@ -1963,27 +1973,25 @@ func main() {
 				return
 			}
 
-			// Resolve target printer
+			// Resolve target printer — a printer name is always required.
 			m := mgr.Load()
 			var driver printers.Driver
 			if printerName != "" {
 				driver = findPrinterByNameOrAlias(m, printerName)
 			}
 			if driver == nil {
-				target := loadSlicerTarget(settingsFile)
-				if target != "" {
-					driver = findPrinterByNameOrAlias(m, target)
-				}
-			}
-			if driver == nil {
-				// Fall back to first available printer
+				// No printer specified or not found — return an error with the
+				// list of available printers so the slicer/user can pick one.
+				available := make([]string, 0, len(m.Drivers()))
 				for _, d := range m.Drivers() {
-					driver = d
-					break
+					available = append(available, d.Name())
 				}
-			}
-			if driver == nil {
-				http.Error(w, `{"error":"no printer available"}`, http.StatusNotFound)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error":    "printer not specified or not found. Use /api/files/{printer_name}/local to upload to a specific printer.",
+					"printers": available,
+				})
 				return
 			}
 
@@ -2045,19 +2053,16 @@ func main() {
 			driver = findPrinterByNameOrAlias(m, printerName)
 		}
 		if driver == nil {
-			target := loadSlicerTarget(settingsFile)
-			if target != "" {
-				driver = findPrinterByNameOrAlias(m, target)
-			}
-		}
-		if driver == nil {
+			available := make([]string, 0, len(m.Drivers()))
 			for _, d := range m.Drivers() {
-				driver = d
-				break
+				available = append(available, d.Name())
 			}
-		}
-		if driver == nil {
-			http.Error(w, `{"error":"no printer available"}`, http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":    "printer not specified or not found. Use /api/files/{printer_name}/local/{filename} to start a print on a specific printer.",
+				"printers": available,
+			})
 			return
 		}
 
@@ -3434,4 +3439,3 @@ func main() {
 		_ = tlsServer.Close()
 	}
 }
-

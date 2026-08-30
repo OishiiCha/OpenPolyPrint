@@ -3655,15 +3655,49 @@ function AddPrinterModal({
   )
 }
 
+function copyToClipboard(text: string): Promise<void> {
+  // Try the modern Clipboard API first (requires HTTPS or localhost)
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text)
+  }
+  // Fallback: use a temporary textarea + execCommand('copy')
+  return new Promise((resolve, reject) => {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      resolve()
+    } catch (err) {
+      reject(err)
+    } finally {
+      document.body.removeChild(textarea)
+    }
+  })
+}
+
 function CopyButton({ text, label = 'copy' }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <button
       onClick={(e) => {
         e.stopPropagation()
-        navigator.clipboard.writeText(text).then(() => {
+        copyToClipboard(text).then(() => {
           setCopied(true)
           setTimeout(() => setCopied(false), 1500)
+        }).catch(() => {
+          // Last resort: select the text for manual copy
+          const range = document.createRange()
+          const span = e.currentTarget.nextElementSibling
+          if (span) {
+            range.selectNode(span)
+            window.getSelection()?.removeAllRanges()
+            window.getSelection()?.addRange(range)
+          }
         })
       }}
       className="shrink-0 rounded bg-slate-700 px-2 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-slate-600"
@@ -3687,15 +3721,19 @@ function OrcaSlicerSetup({ printers }: { printers: Printer[] }) {
         <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
           <li>Open OrcaSlicer → Settings → Physical Printers → Add</li>
           <li>
-            Set the API URL to:
+            Set the API URL to your server address:
             <div className="mt-1 flex items-center gap-2">
               <code className="flex-1 truncate rounded bg-slate-800 px-2 py-1 text-blue-300">{baseUrl}</code>
               <CopyButton text={baseUrl} />
             </div>
           </li>
           <li>Leave the API key field blank (OpenPolyPrint doesn't require one)</li>
-          <li>Set the default target printer in OpenPolyPrint → Settings → Slicer upload target</li>
-          <li>Upload G-code from OrcaSlicer — it will be sent to the printer via PPPP</li>
+          <li>
+            <span className="text-slate-300">Important:</span> You must specify a printer in the
+            upload URL. Use the per-printer URLs below as the "Upload path" in OrcaSlicer's
+            Physical Printer settings.
+          </li>
+          <li>Upload G-code from OrcaSlicer — it will be sent to the specified printer via PPPP</li>
         </ol>
       </div>
 
@@ -4346,17 +4384,16 @@ export function Settings() {
         <Card>
           <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Slicer upload target</h3>
           <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-            When a slicer (PrusaSlicer, OrcaSlicer, Cura) uploads G-code via the OctoPrint API,
-            it goes to this printer by default. You can also override per-upload by using
-            <code className="mx-1 rounded bg-slate-100 px-1 dark:bg-slate-800">/api/files/{"{printer_name}"}/local</code>
-            as the upload URL.
+            Slicers must specify a printer in the upload URL. Use the per-printer URLs shown in the
+            integration settings (e.g. OrcaSlicer setup). This setting is only used as a fallback
+            for slicers that don't support per-printer URLs.
           </p>
           <select
             value={config.slicerTarget}
             onChange={(e) => update({ slicerTarget: e.target.value })}
             className={inputClass}
           >
-            <option value="">Auto (first available printer)</option>
+            <option value="">— None (require explicit printer) —</option>
             {printers.map((p) => (
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}

@@ -115,16 +115,18 @@ func extractToken(r *http.Request) string {
 // Middleware wraps an http.Handler with authentication.
 // Public paths are exempt from auth.
 var publicPaths = map[string]bool{
-	"/api/health":         true,
-	"/api/auth/login":     true,
-	"/api/auth/status":    true,
-	"/api/version":        true, // OctoPrint compat
-	"/api/connection":     true, // OctoPrint compat
-	"/api/settings":       true, // OctoPrint compat
-	"/manifest.json":      true,
-	"/sw.js":              true,
-	"/api/tls/ca":         true,
-	"/api/tls/install/":   true,
+	"/api/health":          true,
+	"/api/auth/login":      true,
+	"/api/auth/status":     true,
+	"/api/version":         true, // OctoPrint compat
+	"/api/connection":      true, // OctoPrint compat
+	"/api/settings":        true, // OctoPrint compat
+	"/api/login":           true, // OctoPrint compat (passive login)
+	"/api/printerprofiles": true, // OctoPrint compat
+	"/manifest.json":       true,
+	"/sw.js":               true,
+	"/api/tls/ca":          true,
+	"/api/tls/install/":    true,
 }
 
 // isPublicPath checks if a path should be exempt from authentication.
@@ -132,8 +134,12 @@ func isPublicPath(path string) bool {
 	if publicPaths[path] {
 		return true
 	}
-	// Allow OctoPrint file uploads (slicers need to work without auth)
-	if path == "/api/files" || path == "/api/files/" {
+	// Allow OctoPrint file upload paths and subpaths (slicers need to work without auth)
+	if path == "/api/files" || path == "/api/files/" || strings.HasPrefix(path, "/api/files/") {
+		return true
+	}
+	// Allow OctoPrint compat endpoints that slicers probe
+	if path == "/api/printer" || path == "/api/job" || path == "/api/timelapse" {
 		return true
 	}
 	// Allow static assets (frontend needs to load before login)
