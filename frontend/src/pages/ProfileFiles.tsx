@@ -13,7 +13,7 @@ interface ProfileFile {
   filename: string
   category: Category
   size: number
-  tags: string[]
+  tags?: string[]
   slicer?: string
   notes?: string
   content?: string
@@ -102,8 +102,9 @@ export function ProfileFiles() {
   }
 
   const filtered = files.filter((f) => {
-    if (tagFilter && !f.tags.includes(tagFilter)) return false
-    if (search && !f.name.toLowerCase().includes(search.toLowerCase()) && !f.tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))) return false
+    const tags = f.tags || []
+    if (tagFilter && !tags.includes(tagFilter)) return false
+    if (search && !f.name.toLowerCase().includes(search.toLowerCase()) && !tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))) return false
     return true
   })
 
@@ -233,7 +234,7 @@ export function ProfileFiles() {
                 </span>
               )}
 
-              {f.tags.length > 0 && (
+              {f.tags && f.tags.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {f.tags.map((tag) => (
                     <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
@@ -443,7 +444,7 @@ function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }
                 {file.slicer}
               </span>
             )}
-            {file.tags.map((tag) => (
+            {file.tags && file.tags.map((tag) => (
               <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                 {tag}
               </span>
@@ -492,7 +493,7 @@ function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }
 function EditModal({ file, onClose, onSaved }: { file: ProfileFile; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(file.name)
   const [slicer, setSlicer] = useState(file.slicer || '')
-  const [tags, setTags] = useState(file.tags.join(', '))
+  const [tags, setTags] = useState((file.tags || []).join(', '))
   const [notes, setNotes] = useState(file.notes || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -588,8 +589,8 @@ interface ConversionResult {
   content: string
   filename: string
   format: string
-  warnings: string[]
-  unmapped: string[]
+  warnings?: string[]
+  unmapped?: string[]
   sections: number
   savedId?: string
   profiles?: ProfileOutput[]
@@ -870,7 +871,7 @@ function ConvertModal({ file, category, onClose, onConverted }: {
                 </div>
               )}
 
-              {result.warnings.length > 0 && (
+              {result.warnings && result.warnings.length > 0 && (
                 <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-3">
                   <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
                     <AlertTriangle className="h-3.5 w-3.5" /> Warnings ({result.warnings.length})
@@ -881,7 +882,7 @@ function ConvertModal({ file, category, onClose, onConverted }: {
                 </div>
               )}
 
-              {result.unmapped.length > 0 && (
+              {result.unmapped && result.unmapped.length > 0 && (
                 <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
                   <div className="mb-1 text-xs font-semibold text-slate-400">
                     Unmapped settings ({result.unmapped.length})
