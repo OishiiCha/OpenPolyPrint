@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -2962,6 +2963,12 @@ func main() {
 				log.Printf("[tls] certificate ready at %s (signed by local CA: %s)", certPath, caCertPath)
 			}
 
+			// Load the initial certificate for hot-swapping
+			initialCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+			if err != nil {
+				log.Printf("[tls] failed to load cert for hot-swap: %v", err)
+			}
+
 			// Auto-install CA into the local system trust store (where the app runs)
 			if !tlsautocert.IsCAInstalledInSystemStore() {
 				if err := tlsautocert.InstallCAToSystemStore(caCertPath); err != nil {
@@ -3019,7 +3026,21 @@ func main() {
 				fmt.Fprint(w, tlsautocert.LinuxInstallScript(host))
 			})
 
+			// certPtr/certMu hold the current TLS certificate for hot-swapping
+			// when new IP addresses are detected (Tailscale, VPN, etc.)
+			var certMu sync.RWMutex
+			certPtr := &initialCert
+
 			tlsServer = &http.Server{Addr: tlsAddr, Handler: authedHandler}
+			// Use GetCertificate so the cert can be hot-swapped when new IPs
+			// are detected (e.g. Tailscale connects after the server starts).
+			tlsServer.TLSConfig = &tls.Config{
+				GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+					certMu.RLock()
+					defer certMu.RUnlock()
+					return certPtr, nil
+				},
+			}
 			go func() {
 				fmt.Printf("OpenPolyPrint listening on https://localhost%s\n", tlsAddr)
 				fmt.Printf("  CA auto-installed on this host. For other devices:\n")
@@ -3028,6 +3049,32 @@ func main() {
 				fmt.Printf("    Linux:   http://localhost/api/tls/install/linux\n")
 				if err := tlsServer.ListenAndServeTLS(certPath, keyPath); err != nil && err != http.ErrServerClosed {
 					log.Fatalf("[https] server on %s: %v", tlsAddr, err)
+				}
+			}()
+
+			// Periodically check for new IP addresses (Tailscale, VPN, DHCP changes)
+			// and regenerate the TLS certificate if needed. The cert is hot-swapped
+			// via GetCertificate so there's no downtime.
+			go func() {
+				ticker := time.NewTicker(2 * time.Minute)
+				defer ticker.Stop()
+				for range ticker.C {
+					regenerated, err := tlsautocert.CheckAndRegenerateIfNeeded(certDir)
+					if err != nil {
+						log.Printf("[tls] periodic check failed: %v", err)
+						continue
+					}
+					if regenerated {
+						newCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+						if err != nil {
+							log.Printf("[tls] failed to load regenerated cert: %v", err)
+							continue
+						}
+						certMu.Lock()
+						certPtr = &newCert
+						certMu.Unlock()
+						log.Printf("[tls] certificate hot-swapped with updated IP addresses")
+					}
 				}
 			}()
 		}

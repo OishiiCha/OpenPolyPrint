@@ -3628,7 +3628,7 @@ function IntegrationModal({
               <li>
                 Set the API URL to your OpenPolyPrint address:
                 <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
-                  http://{'<openpolyprint-ip>'}:8080
+                  http://{'<openpolyprint-ip>'}
                 </code>
               </li>
               <li>Leave the API key field blank</li>
@@ -3636,7 +3636,7 @@ function IntegrationModal({
               <li>
                 For per-printer routing, use this URL instead:
                 <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
-                  http://{'<ip>'}:8080/api/files/{'<printer_name>'}/local
+                  http://{'<ip>'}/api/files/{'<printer_name>'}/local
                 </code>
               </li>
               <li>Upload G-code from the slicer — it will be sent to the printer via PPPP</li>
@@ -3654,7 +3654,7 @@ function IntegrationModal({
               <li>
                 Enter your OpenPolyPrint address:
                 <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
-                  http://{'<openpolyprint-ip>'}:8080
+                  http://{'<openpolyprint-ip>'}
                 </code>
               </li>
               <li>Leave the API key blank</li>
@@ -4758,10 +4758,10 @@ export function Help() {
               <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">PrusaSlicer / OrcaSlicer</h4>
               <ol className="ml-4 list-decimal space-y-1 text-xs text-slate-500 dark:text-slate-400">
                 <li>Open Settings → Physical Printers → Add</li>
-                <li>Set the API URL to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;openpolyprint-ip&gt;:8080</code></li>
+                <li>Set the API URL to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;openpolyprint-ip&gt;</code></li>
                 <li>Leave the API key blank</li>
                 <li>Uploads go to the printer set in Settings → Slicer upload target</li>
-                <li>For per-printer routing, use <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;ip&gt;:8080/api/files/&lt;printer_name&gt;/local</code> as the URL</li>
+                <li>For per-printer routing, use <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;ip&gt;/api/files/&lt;printer_name&gt;/local</code> as the URL</li>
               </ol>
             </div>
             <div>

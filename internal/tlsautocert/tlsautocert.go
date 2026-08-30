@@ -67,6 +67,37 @@ func EnsureCertificate(certDir string) (certPath, keyPath, caCertPath string, re
 	return certPath, keyPath, caCertPath, true, nil
 }
 
+// CheckAndRegenerateIfNeeded checks if the existing certificate covers all
+// current local IP addresses (including newly appeared ones like Tailscale,
+// VPN, or DHCP changes). If IPs are missing, it regenerates the certificate.
+// Returns true if the certificate was regenerated.
+func CheckAndRegenerateIfNeeded(certDir string) (bool, error) {
+	certPath := filepath.Join(certDir, "cert.pem")
+	keyPath := filepath.Join(certDir, "key.pem")
+	caCertPath := filepath.Join(certDir, "ca.pem")
+	caKeyPath := filepath.Join(certDir, "ca-key.pem")
+
+	// Check if existing cert is still valid (covers all current IPs)
+	valid, reason := isServerCertValid(certPath, keyPath, caCertPath)
+	if valid {
+		return false, nil
+	}
+
+	log.Printf("[tls] certificate needs regeneration: %s", reason)
+
+	// Re-sign the server certificate with the existing CA
+	caCert, caKey, _, err := ensureCA(caCertPath, caKeyPath)
+	if err != nil {
+		return false, fmt.Errorf("ensure CA: %w", err)
+	}
+	if err := generateServerCert(certPath, keyPath, caCert, caKey); err != nil {
+		return false, fmt.Errorf("generate server certificate: %w", err)
+	}
+
+	log.Printf("[tls] certificate regenerated with updated IP addresses")
+	return true, nil
+}
+
 // InstallCAToSystemStore installs the CA certificate into the local
 // system's trust store so that tools like curl, wget, and (on Linux)
 // browsers using the system store will trust the HTTPS certificate
