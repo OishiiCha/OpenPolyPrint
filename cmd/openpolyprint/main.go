@@ -35,6 +35,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
 	"github.com/lucas/openpolyprint/internal/printsession"
+	"github.com/lucas/openpolyprint/internal/profileconverter"
 	"github.com/lucas/openpolyprint/internal/profilefiles"
 	"github.com/lucas/openpolyprint/internal/profiles"
 	"github.com/lucas/openpolyprint/internal/push"
@@ -2370,6 +2371,128 @@ func main() {
 		_ = json.NewEncoder(w).Encode(profileFilesStore.AllTags(category))
 	})
 
+	// ── Profile Converter API ──────────────────────────────────────────
+	mux.HandleFunc("/api/profile-files/convert", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		// Accept either multipart (file upload) or JSON (convert existing file by ID)
+		contentType := r.Header.Get("Content-Type")
+		if strings.HasPrefix(contentType, "multipart/") {
+			if err := r.ParseMultipartForm(32 << 20); err != nil {
+				http.Error(w, `{"error":"failed to parse form"}`, http.StatusBadRequest)
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, `{"error":"no file provided"}`, http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			content, err := io.ReadAll(file)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read file"}`, http.StatusBadRequest)
+				return
+			}
+			target := profileconverter.Format(r.FormValue("target"))
+			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer {
+				http.Error(w, `{"error":"invalid target format"}`, http.StatusBadRequest)
+				return
+			}
+			result, err := profileconverter.Convert(string(content), header.Filename, target)
+			if err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+				return
+			}
+			// Optionally save the converted file
+			if r.FormValue("save") == "true" {
+				category := profilefiles.Category(r.FormValue("category"))
+				if category == "" {
+					category = profilefiles.CategoryPrint
+				}
+				slicer := "prusaslicer"
+				if target == profileconverter.FormatCura {
+					slicer = "cura"
+				}
+				var tags []string
+				if tagsStr := r.FormValue("tags"); tagsStr != "" {
+					for _, t := range strings.Split(tagsStr, ",") {
+						t = strings.TrimSpace(t)
+						if t != "" {
+							tags = append(tags, t)
+						}
+					}
+				}
+				pf, err := profileFilesStore.Add(
+					strings.TrimSuffix(result.Filename, filepath.Ext(result.Filename)),
+					result.Filename,
+					category,
+					[]byte(result.Content),
+					slicer,
+					tags,
+					"Converted by OpenPolyPrint",
+				)
+				if err == nil {
+					result.SavedID = pf.ID
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(result)
+		} else {
+			// JSON body: convert an existing stored file by ID
+			var body struct {
+				ID       string `json:"id"`
+				Target   string `json:"target"`
+				Save     bool   `json:"save"`
+				Category string `json:"category"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			pf, err := profileFilesStore.Get(body.ID)
+			if err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			target := profileconverter.Format(body.Target)
+			if target != profileconverter.FormatCura && target != profileconverter.FormatPrusaSlicer {
+				http.Error(w, `{"error":"invalid target format"}`, http.StatusBadRequest)
+				return
+			}
+			result, err := profileconverter.Convert(pf.Content, pf.Filename, target)
+			if err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+				return
+			}
+			if body.Save {
+				category := profilefiles.Category(body.Category)
+				if category == "" {
+					category = pf.Category
+				}
+				slicer := "prusaslicer"
+				if target == profileconverter.FormatCura {
+					slicer = "cura"
+				}
+				saved, err := profileFilesStore.Add(
+					strings.TrimSuffix(result.Filename, filepath.Ext(result.Filename)),
+					result.Filename,
+					category,
+					[]byte(result.Content),
+					slicer,
+					pf.Tags,
+					"Converted from "+pf.Name,
+				)
+				if err == nil {
+					result.SavedID = saved.ID
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(result)
+		}
+	})
+
 	// ── Maintenance API ────────────────────────────────────────────────
 	mux.HandleFunc("/api/maintenance", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -3311,3 +3434,4 @@ func main() {
 		_ = tlsServer.Close()
 	}
 }
+

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Upload, Trash2, Edit3, Download, Eye, Tag as TagIcon,
-  Loader2, FileText, X, Search,
+  Loader2, FileText, X, Search, Repeat, AlertTriangle, CheckCircle2,
 } from 'lucide-react'
 
 type Category = 'filament' | 'print'
@@ -60,6 +60,8 @@ export function ProfileFiles() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [viewing, setViewing] = useState<ProfileFile | null>(null)
   const [editing, setEditing] = useState<ProfileFile | null>(null)
+  const [converting, setConverting] = useState<ProfileFile | null>(null)
+  const [convertOpen, setConvertOpen] = useState(false)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
@@ -122,12 +124,20 @@ export function ProfileFiles() {
           </Link>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-white sm:text-2xl">Profile Files</h1>
         </div>
-        <button
-          onClick={() => setUploadOpen(true)}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
-        >
-          <Upload className="h-4 w-4" /> Upload profile
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setConverting(null); setConvertOpen(true) }}
+            className="flex items-center gap-2 rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+          >
+            <Repeat className="h-4 w-4" /> Convert
+          </button>
+          <button
+            onClick={() => setUploadOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          >
+            <Upload className="h-4 w-4" /> Upload profile
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -205,6 +215,9 @@ export function ProfileFiles() {
                   <button onClick={() => handleDownload(f.id)} className="rounded p-1 text-slate-400 hover:text-emerald-500" title="Download">
                     <Download className="h-4 w-4" />
                   </button>
+                  <button onClick={() => { setConverting(f); setConvertOpen(true) }} className="rounded p-1 text-slate-400 hover:text-purple-500" title="Convert">
+                    <Repeat className="h-4 w-4" />
+                  </button>
                   <button onClick={() => setEditing(f)} className="rounded p-1 text-slate-400 hover:text-blue-500" title="Edit">
                     <Edit3 className="h-4 w-4" />
                   </button>
@@ -263,6 +276,16 @@ export function ProfileFiles() {
           file={editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); fetchAll() }}
+        />
+      )}
+
+      {/* Convert modal */}
+      {convertOpen && (
+        <ConvertModal
+          file={converting}
+          category={activeTab}
+          onClose={() => { setConvertOpen(false); setConverting(null) }}
+          onConverted={() => { setConvertOpen(false); setConverting(null); fetchAll() }}
         />
       )}
     </div>
@@ -549,6 +572,254 @@ function EditModal({ file, onClose, onSaved }: { file: ProfileFile; onClose: () 
           </div>
         </div>
       </form>
+    </div>
+  )
+}
+
+interface ConversionResult {
+  content: string
+  filename: string
+  format: string
+  warnings: string[]
+  unmapped: string[]
+  sections: number
+  savedId?: string
+}
+
+function ConvertModal({ file, category, onClose, onConverted }: {
+  file: ProfileFile | null
+  category: Category
+  onClose: () => void
+  onConverted: () => void
+}) {
+  const [target, setTarget] = useState<'prusaslicer' | 'cura'>('prusaslicer')
+  const [saveResult, setSaveResult] = useState(true)
+  const [converting, setConverting] = useState(false)
+  const [result, setResult] = useState<ConversionResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleConvert = async () => {
+    setConverting(true)
+    setError(null)
+    setResult(null)
+    try {
+      if (file) {
+        const res = await fetch('/api/profile-files/convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: file.id, target, save: saveResult, category }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Conversion failed' }))
+          throw new Error(err.error)
+        }
+        const data = await res.json()
+        setResult(data)
+        if (data.savedId) onConverted()
+      } else if (uploadFile) {
+        const formData = new FormData()
+        formData.append('file', uploadFile)
+        formData.append('target', target)
+        formData.append('save', String(saveResult))
+        formData.append('category', category)
+        const res = await fetch('/api/profile-files/convert', { method: 'POST', body: formData })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Conversion failed' }))
+          throw new Error(err.error)
+        }
+        const data = await res.json()
+        setResult(data)
+        if (data.savedId) onConverted()
+      } else {
+        setError('Select a file to convert or choose a profile from the list')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Conversion failed')
+    } finally {
+      setConverting(false)
+    }
+  }
+
+  const handleDownloadResult = () => {
+    if (!result) return
+    const blob = new Blob([result.content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = result.filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <div
+        className="dark flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+          <h2 className="font-mono text-lg font-semibold text-purple-400">[ profile_converter ]</h2>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Source */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Source</label>
+            {file ? (
+              <div className="rounded-lg bg-slate-900 p-3 text-sm text-slate-300">
+                <span className="text-slate-400">From stored file:</span> {file.name}
+                <span className="ml-2 text-xs text-slate-500">({file.filename})</span>
+              </div>
+            ) : (
+              <div
+                onClick={() => fileRef.current?.click()}
+                className="cursor-pointer rounded-lg border-2 border-dashed border-slate-600 p-4 text-center transition-colors hover:border-purple-500"
+              >
+                {uploadFile ? (
+                  <p className="text-sm text-slate-300">{uploadFile.name} ({formatSize(uploadFile.size)})</p>
+                ) : (
+                  <p className="text-sm text-slate-500">Click to select a profile file to convert</p>
+                )}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".ini,.json,.cfg,.conf,.toml"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) setUploadFile(f)
+                  }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Target format */}
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">Convert to</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTarget('prusaslicer')}
+                className={`flex-1 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-colors ${
+                  target === 'prusaslicer'
+                    ? 'border-orange-500 bg-orange-500/10 text-orange-400'
+                    : 'border-slate-700 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                PrusaSlicer / eufyMake Studio (.ini)
+              </button>
+              <button
+                onClick={() => setTarget('cura')}
+                className={`flex-1 rounded-lg border-2 px-4 py-2 text-sm font-medium transition-colors ${
+                  target === 'cura'
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-slate-700 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                Cura / AnkerMake Slicer (.inst.cfg)
+              </button>
+            </div>
+          </div>
+
+          {/* Save option */}
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={saveResult}
+              onChange={(e) => setSaveResult(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-600 text-purple-600"
+            />
+            Save converted file to Profile Files
+          </label>
+
+          {/* Convert button */}
+          <div className="flex gap-3">
+            <button
+              onClick={handleConvert}
+              disabled={converting || (!file && !uploadFile)}
+              className="rounded-lg bg-purple-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+            >
+              {converting ? 'converting...' : 'convert'}
+            </button>
+            <button onClick={onClose} className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700">
+              close
+            </button>
+          </div>
+
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+
+          {/* Result */}
+          {result && (
+            <div className="space-y-3 border-t border-slate-800 pt-4">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                <span className="text-sm text-emerald-400">Conversion complete</span>
+                {result.savedId && (
+                  <span className="rounded-full bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-300">saved to profile files</span>
+                )}
+              </div>
+
+              <div className="rounded-lg bg-slate-900 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Output: {result.filename}</span>
+                  <button
+                    onClick={handleDownloadResult}
+                    className="flex items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-600"
+                  >
+                    <Download className="h-3 w-3" /> download
+                  </button>
+                </div>
+                <pre className="max-h-48 overflow-auto rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300">
+                  {result.content.slice(0, 2000)}{result.content.length > 2000 ? '\n... (truncated)' : ''}
+                </pre>
+              </div>
+
+              {result.warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-700/50 bg-amber-900/20 p-3">
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Warnings ({result.warnings.length})
+                  </div>
+                  <ul className="ml-4 list-disc space-y-0.5 text-xs text-amber-300/80">
+                    {result.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {result.unmapped.length > 0 && (
+                <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+                  <div className="mb-1 text-xs font-semibold text-slate-400">
+                    Unmapped settings ({result.unmapped.length})
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {result.unmapped.map((u, i) => (
+                      <span key={i} className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{u}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Info */}
+          {!result && (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs text-slate-400">
+              <p className="mb-1 font-semibold text-slate-300">How it works:</p>
+              <ul className="ml-4 list-disc space-y-0.5">
+                <li>Upload or select a slicer profile file (.ini, .inst.cfg, .def.json)</li>
+                <li>The source format is auto-detected from the file content</li>
+                <li>Settings are mapped to the target format's equivalents</li>
+                <li>Some settings may not have direct equivalents — these are listed as unmapped</li>
+                <li>Review the warnings and unmapped settings before using the converted profile</li>
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
