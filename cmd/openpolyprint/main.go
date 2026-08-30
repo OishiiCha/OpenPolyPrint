@@ -35,6 +35,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
 	"github.com/lucas/openpolyprint/internal/printsession"
+	"github.com/lucas/openpolyprint/internal/profilefiles"
 	"github.com/lucas/openpolyprint/internal/profiles"
 	"github.com/lucas/openpolyprint/internal/push"
 	"github.com/lucas/openpolyprint/internal/queue"
@@ -510,6 +511,11 @@ func main() {
 	queueStore := queue.NewStore(settingsDir)
 	filamentStore := filament.NewStore(settingsDir)
 	profileStore := profiles.NewStore(settingsDir)
+	profileFilesDir := filepath.Join(settingsDir, "profilefiles")
+	profileFilesStore, err := profilefiles.NewStore(profileFilesDir)
+	if err != nil {
+		log.Printf("profile files store: %v", err)
+	}
 	maintStore := maintenance.NewStore(settingsDir)
 	plugMgr := smartplug.NewManager()
 	pushMgr := push.NewManager(settingsDir)
@@ -2239,6 +2245,129 @@ func main() {
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
+	})
+
+	// ── Profile Files API (uploaded slicer profiles) ───────────────────
+	mux.HandleFunc("/api/profile-files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			category := profilefiles.Category(r.URL.Query().Get("category"))
+			_ = json.NewEncoder(w).Encode(profileFilesStore.List(category))
+		case http.MethodPost:
+			// Multipart upload: file + metadata fields
+			if err := r.ParseMultipartForm(32 << 20); err != nil {
+				http.Error(w, `{"error":"failed to parse form: `+err.Error()+`"}`, http.StatusBadRequest)
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, `{"error":"no file provided"}`, http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			content, err := io.ReadAll(file)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read file"}`, http.StatusBadRequest)
+				return
+			}
+			name := r.FormValue("name")
+			if name == "" {
+				name = header.Filename
+			}
+			category := profilefiles.Category(r.FormValue("category"))
+			if category != profilefiles.CategoryFilament && category != profilefiles.CategoryPrint {
+				http.Error(w, `{"error":"invalid category"}`, http.StatusBadRequest)
+				return
+			}
+			slicer := r.FormValue("slicer")
+			notes := r.FormValue("notes")
+			var tags []string
+			if tagsStr := r.FormValue("tags"); tagsStr != "" {
+				for _, t := range strings.Split(tagsStr, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
+				}
+			}
+			pf, err := profileFilesStore.Add(name, header.Filename, category, content, slicer, tags, notes)
+			if err != nil {
+				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(pf)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/profile-files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch r.Method {
+		case http.MethodGet:
+			// Download the file content
+			data, filename, err := profileFilesStore.Content(id)
+			if err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+			_, _ = w.Write(data)
+		case http.MethodPut, http.MethodPatch:
+			// Update metadata (name, tags, notes, slicer)
+			var body struct {
+				Name   string   `json:"name"`
+				Tags   []string `json:"tags"`
+				Notes  string   `json:"notes"`
+				Slicer string   `json:"slicer"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !profileFilesStore.Update(id, body.Name, body.Tags, body.Notes, body.Slicer) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			pf, _ := profileFilesStore.Get(id)
+			_ = json.NewEncoder(w).Encode(pf)
+		case http.MethodDelete:
+			if !profileFilesStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/profile-files/{id}/view", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		pf, err := profileFilesStore.Get(id)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(pf)
+	})
+
+	mux.HandleFunc("/api/profile-files/tags", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		category := profilefiles.Category(r.URL.Query().Get("category"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(profileFilesStore.AllTags(category))
 	})
 
 	// ── Maintenance API ────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import { SmartPlugs } from './pages/SmartPlugs'
 import { PrintAnalysis } from './pages/PrintAnalysis'
 import { Analytics } from './pages/Analytics'
 import { Profiles } from './pages/Profiles'
+import { ProfileFiles } from './pages/ProfileFiles'
 import { Login } from './pages/Login'
 import { BackgroundStreams } from './components/BackgroundStreams'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -84,6 +85,7 @@ function App() {
             <Route path="queue" element={<PrintQueue />} />
             <Route path="filament" element={<Filament />} />
             <Route path="profiles" element={<Profiles />} />
+            <Route path="profile-files" element={<ProfileFiles />} />
             <Route path="plugs" element={<SmartPlugs />} />
             <Route path="analysis" element={<PrintAnalysis />} />
             <Route path="analytics" element={<Analytics />} />

@@ -4307,6 +4307,7 @@ export function Settings() {
               { to: '/queue', label: 'Queue' },
               { to: '/filament', label: 'Filament' },
               { to: '/profiles', label: 'Profiles' },
+              { to: '/profile-files', label: 'Profile Files' },
               { to: '/plugs', label: 'Plugs' },
               { to: '/analysis', label: 'Analysis' },
               { to: '/cameras', label: 'Cameras' },
