@@ -42,6 +42,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/push"
 	"github.com/lucas/openpolyprint/internal/queue"
 	"github.com/lucas/openpolyprint/internal/smartplug"
+	"github.com/lucas/openpolyprint/internal/stlfiles"
 	"github.com/lucas/openpolyprint/internal/tempstore"
 	"github.com/lucas/openpolyprint/internal/tlsautocert"
 )
@@ -504,6 +505,11 @@ func main() {
 	profileFilesStore, err := profilefiles.NewStore(profileFilesDir)
 	if err != nil {
 		log.Printf("profile files store: %v", err)
+	}
+	stlFilesDir := filepath.Join(settingsDir, "stlfiles")
+	stlFilesStore, err := stlfiles.NewStore(stlFilesDir)
+	if err != nil {
+		log.Printf("stl files store: %v", err)
 	}
 	maintStore := maintenance.NewStore(settingsDir)
 	plugMgr := smartplug.NewManager()
@@ -2409,6 +2415,106 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(result)
 		}
+	})
+
+	// ── STL Files API ─────────────────────────────────────────────────
+	mux.HandleFunc("/api/stl-files", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(stlFilesStore.List())
+		case http.MethodPost:
+			if err := r.ParseMultipartForm(100 << 20); err != nil {
+				http.Error(w, `{"error":"failed to parse form"}`, http.StatusBadRequest)
+				return
+			}
+			h := r.MultipartForm.File["file"]
+			if len(h) == 0 {
+				http.Error(w, `{"error":"no file"}`, http.StatusBadRequest)
+				return
+			}
+			f, err := h[0].Open()
+			if err != nil {
+				http.Error(w, `{"error":"failed to open file"}`, http.StatusInternalServerError)
+				return
+			}
+			defer f.Close()
+			data, err := io.ReadAll(f)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
+				return
+			}
+			name := h[0].Filename
+			if name == "" {
+				name = "model.stl"
+			}
+			displayName := strings.TrimSuffix(name, filepath.Ext(name))
+			var tags []string
+			if vals := r.MultipartForm.Value["tags"]; len(vals) > 0 {
+				for _, t := range strings.Split(vals[0], ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
+				}
+			}
+			notes := ""
+			if vals := r.MultipartForm.Value["notes"]; len(vals) > 0 {
+				notes = vals[0]
+			}
+			saved, err := stlFilesStore.Add(displayName, name, data, tags, notes)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(saved)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/stl-files/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch r.Method {
+		case http.MethodGet:
+			data, filename, err := stlFilesStore.Content(id)
+			if err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+			w.Write(data)
+		case http.MethodPut:
+			var body struct {
+				Name  string   `json:"name"`
+				Tags  []string `json:"tags"`
+				Notes string   `json:"notes"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !stlFilesStore.Update(id, body.Name, body.Tags, body.Notes) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case http.MethodDelete:
+			if !stlFilesStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/stl-files/tags", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(stlFilesStore.AllTags())
 	})
 
 	// ── Maintenance API ────────────────────────────────────────────────
