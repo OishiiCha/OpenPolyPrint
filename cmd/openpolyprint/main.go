@@ -1764,8 +1764,8 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"api":    "0.1",
-			"server": "2.0.0",
-			"text":   "OpenPolyPrint OctoPrint-compatible API",
+			"server": "1.9.0",
+			"text":   "OctoPrint 1.9.0",
 		})
 	}))
 
@@ -1829,7 +1829,20 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"state": map[string]string{"text": stateText},
+			"state": map[string]any{
+				"text": stateText,
+				"flags": map[string]any{
+					"operational":   stateText != "Offline",
+					"printing":      stateText == "Printing",
+					"closedOrError": stateText == "Offline",
+					"error":         false,
+					"paused":        stateText == "Paused",
+					"pausing":       false,
+					"cancelling":    false,
+					"ready":         stateText == "Operational",
+					"sdReady":       false,
+				},
+			},
 			"temperature": map[string]any{
 				"tool0": map[string]float64{"actual": status.Temps.Nozzle, "target": status.Temps.TargetNozzle, "offset": 0},
 				"bed":   map[string]float64{"actual": status.Temps.Bed, "target": status.Temps.TargetBed, "offset": 0},
@@ -1934,26 +1947,21 @@ func main() {
 
 		var printerName string
 		var isUpload bool
-		var fileToPrint string
 
 		if len(pathParts) == 1 && pathParts[0] == "local" {
-			// /api/files/local â†’ upload
+			// /api/files/local â upload
 			isUpload = true
 		} else if len(pathParts) == 2 && pathParts[1] == "local" {
-			// /api/files/{printer}/local â†’ upload
+			// /api/files/{printer}/local â upload
 			printerName = pathParts[0]
 			isUpload = true
 		} else if len(pathParts) == 2 && pathParts[0] == "local" {
-			// /api/files/local/{filename} â†’ select (standard OctoPrint)
-			fileToPrint = pathParts[1]
+			// /api/files/local/{filename} â select (standard OctoPrint), accept silently
 		} else if len(pathParts) == 3 && pathParts[1] == "local" {
-			// /api/files/{printer}/local/{filename} â†’ select on specific printer
+			// /api/files/{printer}/local/{filename} â select on specific printer, accept silently
 			printerName = pathParts[0]
-			fileToPrint = pathParts[2]
-		} else if len(pathParts) >= 1 {
-			// Fallback: treat as select with first segment as filename
-			fileToPrint = pathParts[len(pathParts)-1]
 		}
+		// All other paths: accept silently (file select)
 
 		if isUpload {
 			// File upload via multipart form
@@ -2020,13 +2028,17 @@ func main() {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Location", "/api/files/local/"+filename)
+			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"files": map[string]any{
 					"local": map[string]any{
 						"name":   filename,
+						"path":   filename,
 						"origin": "local",
 						"size":   len(data),
 						"type":   "machinecode",
+						"date":   time.Now().Unix(),
 					},
 				},
 				"done": true,
@@ -2036,45 +2048,8 @@ func main() {
 
 		// File select: POST /api/files/local/{filename} or /api/files/{printer}/local/{filename}
 		// with JSON body {"command":"select","print":true}
-		var req struct {
-			Command string `json:"command"`
-			Print   bool   `json:"print"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-
-		if req.Command != "select" {
-			http.Error(w, `{"error":"unsupported command"}`, http.StatusBadRequest)
-			return
-		}
-
-		m := mgr.Load()
-		var driver printers.Driver
-		if printerName != "" {
-			driver = findPrinterByNameOrAlias(m, printerName)
-		}
-		if driver == nil {
-			available := make([]string, 0, len(m.Drivers()))
-			for _, d := range m.Drivers() {
-				available = append(available, d.Name())
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error":    "printer not specified or not found. Use /api/files/{printer_name}/local/{filename} to start a print on a specific printer.",
-				"printers": available,
-			})
-			return
-		}
-
-		if req.Print {
-			if err := driver.StartPrint(r.Context(), fileToPrint); err != nil {
-				log.Printf("[slicer] start print %s on %s failed: %v", fileToPrint, driver.Name(), err)
-				http.Error(w, fmt.Sprintf(`{"error":"start print failed: %s"}`, err.Error()), http.StatusInternalServerError)
-				return
-			}
-			log.Printf("[slicer] started print %s on %s", fileToPrint, driver.Name())
-		}
-
+		// Accept silently — the file was already sent to printer during upload
+		// (if print=true was passed during upload). This matches OpenMake's behavior.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 	})
