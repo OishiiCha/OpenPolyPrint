@@ -6,6 +6,7 @@ import { Switch } from '../components/Switch'
 import { BedPreview } from '../components/BedPreview'
 import { GCodePreview } from '../components/GCodePreview'
 import { CameraStream } from '../components/CameraStream'
+import { AutoScrollText } from '../components/AutoScrollText'
 import { TempChart } from '../components/TempChart'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import {
@@ -76,12 +77,12 @@ function cameraAspectClass(camera?: Camera): string {
 
 export function SectionTitle({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="mb-4 flex items-center justify-between">
-      <h1 className="text-2xl font-mono font-semibold text-blue-600 dark:text-blue-400">
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <h1 className="text-xl font-mono font-semibold text-blue-600 dark:text-blue-400 sm:text-2xl">
         <span className="mr-2 text-slate-500 dark:text-slate-400">&gt;</span>[ {title} ]
         <span className="ml-1 animate-pulse">_</span>
       </h1>
-      {action}
+      {action && <div className="flex flex-wrap items-center gap-2">{action}</div>}
     </div>
   )
 }
@@ -97,7 +98,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-none border-2 border-slate-300 border-t-4 border-t-blue-500 bg-white p-6 shadow-md shadow-blue-500/10 transition-shadow hover:shadow-lg dark:border-slate-700 dark:bg-slate-950 dark:shadow-blue-500/20 ${className}`}
+      className={`overflow-hidden rounded-none border-2 border-slate-300 border-t-4 border-t-blue-500 bg-white p-4 shadow-md shadow-blue-500/10 transition-shadow hover:shadow-lg dark:border-slate-700 dark:bg-slate-950 dark:shadow-blue-500/20 sm:p-6 ${className}`}
       style={color ? { borderTopColor: color, boxShadow: `0 4px 6px -1px ${color}20` } : undefined}
     >
       {children}
@@ -203,7 +204,9 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
   const [recordMenuOpen, setRecordMenuOpen] = useState(false)
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
+  const { renamePrinter } = usePrinters()
 
   // Poll recording status
   useEffect(() => {
@@ -260,8 +263,19 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
             <div className="rounded-xl bg-slate-100 p-2.5 dark:bg-slate-800">
               <PrinterIcon className="h-6 w-6 text-slate-600 dark:text-slate-300" />
             </div>
-            <div>
-              <h3 className="font-semibold text-slate-900 dark:text-white">{printer.name}</h3>
+            <div className="min-w-0 flex-1">
+              <div className="group flex items-center gap-1.5">
+                <h3 className="min-w-0 flex-1 font-semibold text-slate-900 dark:text-white">
+                  <AutoScrollText text={printer.name} />
+                </h3>
+                <button
+                  onClick={() => setRenameOpen(true)}
+                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-blue-500 group-hover:opacity-100"
+                  title="Rename printer"
+                >
+                  <SettingsIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">{printer.type}</p>
             </div>
           </div>
@@ -297,7 +311,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <div className="mt-4 grid gap-3 sm:gap-4 sm:grid-cols-2">
           <div className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
             <Flame className="h-4 w-4 text-rose-500" />
             <div>
@@ -482,8 +496,10 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                 <div className="rounded-xl bg-slate-800 p-2">
                   <PrinterIcon className="h-5 w-5 text-slate-300" />
                 </div>
-                <div>
-                  <h2 className="font-semibold text-white">{printer.name}</h2>
+                <div className="min-w-0">
+                  <h2 className="font-semibold text-white">
+                    <AutoScrollText text={printer.name} />
+                  </h2>
                   <p className="text-xs text-slate-400 capitalize">{printer.type}</p>
                 </div>
                 <span className={`ml-2 rounded-full px-2.5 py-1 text-xs font-medium ${statusColor[printer.status] || statusColor.Idle}`}>
@@ -669,7 +685,92 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
         </div>,
         document.body
       )}
+
+      {/* Rename printer modal */}
+      {renameOpen && createPortal(
+        <RenamePrinterModal
+          printer={printer}
+          onClose={() => setRenameOpen(false)}
+          onRename={async (name) => {
+            await renamePrinter(printer.id, name)
+            setRenameOpen(false)
+          }}
+        />,
+        document.body
+      )}
     </>
+  )
+}
+
+function RenamePrinterModal({ printer, onClose, onRename }: { printer: Printer; onClose: () => void; onRename: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(printer.name)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) {
+      setError('Name cannot be empty')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await onRename(name.trim())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <form
+        className="dark w-full max-w-sm rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <h2 className="mb-4 font-mono text-lg font-semibold text-blue-400">[ rename_printer ]</h2>
+        <p className="mb-3 text-xs text-slate-400">
+          Set a custom display name for this printer. The original name from the printer is preserved.
+        </p>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Printer name"
+          autoFocus
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+        <div className="mt-4 flex gap-3">
+          <button
+            type="submit"
+            disabled={saving || name.trim() === printer.name}
+            className="rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+          >
+            {saving ? 'saving...' : 'save'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700"
+          >
+            cancel
+          </button>
+          {name !== printer.name && (
+            <button
+              type="button"
+              onClick={() => { setName(printer.name); }}
+              className="ml-auto rounded-lg px-3 py-2 font-mono text-xs text-slate-500 hover:text-slate-300"
+            >
+              reset
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
   )
 }
 
@@ -729,7 +830,7 @@ export function Dashboard() {
         {showSensors && (
           <div className="space-y-3">
             <h3 className="font-mono text-sm font-semibold text-slate-400">[ filament_box_sensors ]</h3>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {enabledSensors.map((s) => (
                 <div
                   key={s.id}
@@ -775,7 +876,7 @@ export function Dashboard() {
           </div>
         )}
 
-        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
           {printers.map((p) => (
             <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} allCameras={cameras.filter((c) => c.printerId === p.id)} />
           ))}
@@ -784,7 +885,7 @@ export function Dashboard() {
         {unassignedCameras.length > 0 && (
           <div className="space-y-4">
             <SectionTitle title="Unassigned cameras" />
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {unassignedCameras.map((c) => (
                 <CameraCard key={c.id} camera={c} printers={printers} />
               ))}
@@ -817,10 +918,10 @@ function PrinterModal({ printer, onClose }: { printer: Printer; onClose: () => v
         className="dark flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 shadow-2xl shadow-blue-500/20"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-4">
-          <div>
-            <h2 className="text-xl font-mono font-semibold text-blue-400">
-              <span className="mr-2 text-slate-500">&gt;</span>[ {printer.name} ]
+        <div className="flex items-center justify-between gap-4 border-b border-slate-800 bg-slate-900 px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <h2 className="text-lg font-mono font-semibold text-blue-400 sm:text-xl">
+              <span className="mr-2 text-slate-500">&gt;</span>[ <AutoScrollText text={printer.name} /> ]
             </h2>
             <p className="font-mono text-sm text-slate-500">
               <span className="text-blue-400">status:</span> {printer.status.toLowerCase()}
@@ -1202,7 +1303,7 @@ export function Printers() {
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
         {printers.map((p) => (
           <PrinterCard key={p.id} printer={p} onOpen={() => setSelected(p)} camera={cameras.find((c) => c.printerId === p.id && c.enabled)} allCameras={cameras.filter((c) => c.printerId === p.id)} />
         ))}
@@ -1233,9 +1334,11 @@ export function PrinterDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{printer.name}</h1>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-white sm:text-2xl">
+            <AutoScrollText text={printer.name} />
+          </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 capitalize">{printer.type}</p>
         </div>
         <Link
@@ -3552,10 +3655,170 @@ function AddPrinterModal({
   )
 }
 
+function CopyButton({ text, label = 'copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+      className="shrink-0 rounded bg-slate-700 px-2 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-slate-600"
+    >
+      {copied ? 'copied!' : label}
+    </button>
+  )
+}
+
+function OrcaSlicerSetup({ printers }: { printers: Printer[] }) {
+  const protocol = window.location.protocol
+  const host = window.location.hostname
+  const port = window.location.port
+  const baseUrl = `${protocol}//${host}${port ? ':' + port : ''}`
+
+  return (
+    <div className="mb-6 space-y-4">
+      {/* Quick setup */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+        <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">Quick setup</h4>
+        <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
+          <li>Open OrcaSlicer → Settings → Physical Printers → Add</li>
+          <li>
+            Set the API URL to:
+            <div className="mt-1 flex items-center gap-2">
+              <code className="flex-1 truncate rounded bg-slate-800 px-2 py-1 text-blue-300">{baseUrl}</code>
+              <CopyButton text={baseUrl} />
+            </div>
+          </li>
+          <li>Leave the API key field blank (OpenPolyPrint doesn't require one)</li>
+          <li>Set the default target printer in OpenPolyPrint → Settings → Slicer upload target</li>
+          <li>Upload G-code from OrcaSlicer — it will be sent to the printer via PPPP</li>
+        </ol>
+      </div>
+
+      {/* Per-printer URLs */}
+      {printers.length > 0 && (
+        <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+          <h4 className="mb-1 font-mono text-sm font-semibold text-slate-200">Per-printer upload URLs</h4>
+          <p className="mb-3 font-mono text-[11px] text-slate-500">
+            Use these URLs in OrcaSlicer's Physical Printer settings to upload directly to a specific printer.
+            In OrcaSlicer, set the "Upload path" to the URL below.
+          </p>
+          <div className="space-y-2">
+            {printers.map((p) => {
+              const url = `${baseUrl}/api/files/${encodeURIComponent(p.name)}/local`
+              return (
+                <div key={p.id} className="flex items-center gap-2 rounded bg-slate-800/50 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-mono text-xs font-semibold text-slate-200">{p.name}</span>
+                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${statusColor[p.status] || statusColor.Idle}`}>
+                        {p.status}
+                      </span>
+                    </div>
+                    <code className="mt-0.5 block truncate font-mono text-[10px] text-blue-300">{url}</code>
+                  </div>
+                  <CopyButton text={url} />
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* OrcaSlicer-specific tips */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+        <h4 className="mb-2 font-mono text-sm font-semibold text-slate-200">OrcaSlicer tips</h4>
+        <ul className="ml-4 list-disc space-y-1.5 font-mono text-xs text-slate-400">
+          <li>
+            <span className="text-slate-300">Multiple printers:</span> Create a separate Physical Printer
+            in OrcaSlicer for each OpenPolyPrint printer, each with its own upload URL from above.
+          </li>
+          <li>
+            <span className="text-slate-300">Print profiles:</span> OrcaSlicer printer profiles are
+            independent of the upload target. You can use any profile with any Physical Printer.
+          </li>
+          <li>
+            <span className="text-slate-300">HTTPS:</span> If OpenPolyPrint uses HTTPS with a self-signed
+            certificate, install the CA on your machine first (Settings → HTTPS → Install CA) so OrcaSlicer
+            can connect without certificate errors.
+          </li>
+          <li>
+            <span className="text-slate-300">Remote access:</span> For remote slicing over Tailscale or VPN,
+            use the remote hostname or IP as the API URL. The certificate auto-includes new IPs.
+          </li>
+          <li>
+            <span className="text-slate-300">Test:</span> After configuring, use OrcaSlicer's "Test" button
+            on the Physical Printer to verify connectivity. A successful test returns the printer list.
+          </li>
+        </ul>
+      </div>
+
+      {/* Connection test */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+        <h4 className="mb-2 font-mono text-sm font-semibold text-slate-200">Test connection</h4>
+        <p className="mb-3 font-mono text-[11px] text-slate-500">
+          Verify that OrcaSlicer can reach OpenPolyPrint via the OctoPrint API.
+        </p>
+        <ConnectionTestButton url={`${baseUrl}/api/version`} />
+      </div>
+    </div>
+  )
+}
+
+function ConnectionTestButton({ url }: { url: string }) {
+  const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
+
+  const test = async () => {
+    setStatus('testing')
+    try {
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.server || data.api_version) {
+          setStatus('ok')
+        } else {
+          setStatus('ok')
+        }
+      } else {
+        setStatus('fail')
+      }
+    } catch {
+      setStatus('fail')
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        onClick={test}
+        disabled={status === 'testing'}
+        className="rounded-lg bg-blue-600 px-4 py-2 font-mono text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+      >
+        {status === 'testing' ? 'testing...' : 'test connection'}
+      </button>
+      {status === 'ok' && (
+        <span className="flex items-center gap-1.5 font-mono text-xs text-emerald-400">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" /> Connected — OctoPrint API reachable
+        </span>
+      )}
+      {status === 'fail' && (
+        <span className="flex items-center gap-1.5 font-mono text-xs text-rose-400">
+          <span className="h-2 w-2 rounded-full bg-rose-500" /> Failed — check URL and network
+        </span>
+      )}
+    </div>
+  )
+}
+
 function IntegrationModal({
   integration,
   enabled,
   values,
+  printers,
   onClose,
   onSave,
   onTest,
@@ -3563,6 +3826,7 @@ function IntegrationModal({
   integration: Integration | null
   enabled: boolean
   values: Record<string, string>
+  printers: Printer[]
   onClose: () => void
   onSave: (enabled: boolean, values: Record<string, string>) => void
   onTest: (values: Record<string, string>) => void
@@ -3619,12 +3883,12 @@ function IntegrationModal({
           </a>
         )}
 
-        {/* Slicer setup instructions */}
-        {(integration.id === 'prusaslicer' || integration.id === 'orcaslicer') && (
+        {/* PrusaSlicer setup instructions */}
+        {integration.id === 'prusaslicer' && (
           <div className="mb-6 rounded-lg border border-slate-700 bg-slate-900/50 p-4">
             <h4 className="mb-3 font-mono text-sm font-semibold text-slate-200">Setup instructions</h4>
             <ol className="ml-4 list-decimal space-y-2 font-mono text-xs text-slate-400">
-              <li>Open {integration.name} → Settings → Physical Printers → Add</li>
+              <li>Open PrusaSlicer → Settings → Physical Printers → Add</li>
               <li>
                 Set the API URL to your OpenPolyPrint address:
                 <code className="ml-1 block rounded bg-slate-800 px-2 py-1 text-blue-300">
@@ -3642,6 +3906,11 @@ function IntegrationModal({
               <li>Upload G-code from the slicer — it will be sent to the printer via PPPP</li>
             </ol>
           </div>
+        )}
+
+        {/* OrcaSlicer setup instructions — enhanced with actual address and per-printer URLs */}
+        {integration.id === 'orcaslicer' && (
+          <OrcaSlicerSetup printers={printers} />
         )}
 
         {integration.id === 'cura' && (
@@ -4427,6 +4696,7 @@ export function Settings() {
         }
         enabled={config.integrations[integrationOpen ?? '']?.enabled ?? false}
         values={config.integrations[integrationOpen ?? '']?.fields ?? {}}
+        printers={printers}
         onClose={() => setIntegrationOpen(null)}
         onSave={(enabled, values) => {
           const id = integrationOpen ?? ''
@@ -4755,13 +5025,25 @@ export function Help() {
           </p>
           <div className="space-y-4">
             <div>
-              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">PrusaSlicer / OrcaSlicer</h4>
+              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">PrusaSlicer</h4>
               <ol className="ml-4 list-decimal space-y-1 text-xs text-slate-500 dark:text-slate-400">
                 <li>Open Settings → Physical Printers → Add</li>
                 <li>Set the API URL to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;openpolyprint-ip&gt;</code></li>
                 <li>Leave the API key blank</li>
                 <li>Uploads go to the printer set in Settings → Slicer upload target</li>
                 <li>For per-printer routing, use <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;ip&gt;/api/files/&lt;printer_name&gt;/local</code> as the URL</li>
+              </ol>
+            </div>
+            <div>
+              <h4 className="mb-1 font-mono text-sm font-semibold text-slate-700 dark:text-slate-300">OrcaSlicer</h4>
+              <ol className="ml-4 list-decimal space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <li>Open Settings → Physical Printers → Add</li>
+                <li>Set the API URL to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;openpolyprint-ip&gt;</code></li>
+                <li>Leave the API key blank</li>
+                <li>Create one Physical Printer per OpenPolyPrint printer for direct routing</li>
+                <li>For per-printer routing, set the Upload path to <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">http://&lt;ip&gt;/api/files/&lt;printer_name&gt;/local</code></li>
+                <li>Use the "Test" button in OrcaSlicer to verify connectivity</li>
+                <li>For remote access over Tailscale, use the Tailscale hostname as the API URL</li>
               </ol>
             </div>
             <div>

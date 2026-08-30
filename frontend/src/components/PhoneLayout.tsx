@@ -19,6 +19,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
+import { AutoScrollText } from './AutoScrollText'
 import { useCameras } from '../hooks/useCameras'
 import { usePrinters } from '../hooks/usePrinters'
 import { usePiReadings } from '../hooks/usePi'
@@ -122,10 +123,10 @@ function PhoneDashboard() {
 
         {/* Printer status overlay (top-left) */}
         {mainPrinter && (
-          <div className="absolute left-2 top-2 rounded-lg bg-black/60 px-3 py-2 backdrop-blur-sm">
+          <div className="absolute left-2 top-2 max-w-[calc(100%-1rem)] rounded-lg bg-black/60 px-3 py-2 backdrop-blur-sm">
             <div className="flex items-center gap-2">
-              <div className={`h-2 w-2 rounded-full ${mainPrinter.status === 'Printing' ? 'animate-pulse bg-blue-500' : mainPrinter.status === 'Offline' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-              <span className="font-mono text-xs font-medium text-white">{mainPrinter.name}</span>
+              <div className={`h-2 w-2 shrink-0 rounded-full ${mainPrinter.status === 'Printing' ? 'animate-pulse bg-blue-500' : mainPrinter.status === 'Offline' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+              <AutoScrollText text={mainPrinter.name} className="font-mono text-xs font-medium text-white" />
             </div>
             {mainPrinter.status === 'Printing' && (
               <div className="mt-1">

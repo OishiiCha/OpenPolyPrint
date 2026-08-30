@@ -68,5 +68,21 @@ export function usePrinters() {
     [refresh]
   )
 
-  return { printers, loading, error, refresh, addPrinter, removePrinter }
+  const renamePrinter = useCallback(
+    async (id: string, name: string) => {
+      const res = await fetch(`/api/printers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to rename printer')
+        throw new Error(msg)
+      }
+      refresh()
+    },
+    [refresh]
+  )
+
+  return { printers, loading, error, refresh, addPrinter, removePrinter, renamePrinter }
 }

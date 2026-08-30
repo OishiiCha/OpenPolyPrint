@@ -29,9 +29,9 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { useAuth } from './hooks/useAuth'
 
 function useIsPhone() {
-  const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 767px)').matches)
+  const [isPhone, setIsPhone] = useState(() => window.matchMedia('(max-width: 640px)').matches)
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)')
+    const mq = window.matchMedia('(max-width: 640px)')
     const handler = (e: MediaQueryListEvent) => setIsPhone(e.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)

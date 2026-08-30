@@ -59,6 +59,68 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 var manualPrinters []printers.PrinterConfig
 
+// printerAliases maps printer ID → custom display name.
+// Loaded from printer_aliases.json in the settings directory.
+var printerAliases map[string]string
+var printerAliasesMu sync.RWMutex
+
+func loadPrinterAliases(path string) map[string]string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	var out map[string]string
+	if err := json.Unmarshal(data, &out); err != nil {
+		log.Printf("printer aliases load: %v", err)
+		return map[string]string{}
+	}
+	if out == nil {
+		out = map[string]string{}
+	}
+	return out
+}
+
+func savePrinterAliases(path string, m map[string]string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
+// applyAliases replaces printer names with custom aliases if set.
+func applyAliases(statuses []printers.Status) []printers.Status {
+	printerAliasesMu.RLock()
+	defer printerAliasesMu.RUnlock()
+	for i := range statuses {
+		if alias, ok := printerAliases[statuses[i].ID]; ok && alias != "" {
+			statuses[i].Name = alias
+		}
+	}
+	return statuses
+}
+
+// findPrinterByNameOrAlias finds a printer driver by its original name or alias.
+func findPrinterByNameOrAlias(m *printers.Manager, name string) printers.Driver {
+	if d := m.FindByName(name); d != nil {
+		return d
+	}
+	// Check if name matches an alias
+	printerAliasesMu.RLock()
+	defer printerAliasesMu.RUnlock()
+	for id, alias := range printerAliases {
+		if strings.EqualFold(alias, name) {
+			if d := m.Find(id); d != nil {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
 func buildManager(cfg *config.Config) *printers.Manager {
 	var drivers []printers.Driver
 	if cfg != nil {
@@ -436,6 +498,7 @@ func main() {
 	settingsFile := filepath.Join(settingsDir, "settings.json")
 	gcodeDir := filepath.Join(settingsDir, "gcode")
 	manualPrinters = loadManualPrinters(filepath.Join(settingsDir, "printers.json"))
+	printerAliases = loadPrinterAliases(filepath.Join(settingsDir, "printer_aliases.json"))
 
 	gcodeStore, err := gcode.NewStore(gcodeDir)
 	if err != nil {
@@ -1720,7 +1783,7 @@ func main() {
 		target := loadSlicerTarget(settingsFile)
 		var status printers.Status
 		if target != "" {
-			if d := mgr.Load().FindByName(target); d != nil {
+			if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
 				status, _ = d.Status()
 			}
 		}
@@ -1755,7 +1818,7 @@ func main() {
 		target := loadSlicerTarget(settingsFile)
 		var status printers.Status
 		if target != "" {
-			if d := mgr.Load().FindByName(target); d != nil {
+			if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
 				status, _ = d.Status()
 			}
 		}
@@ -1897,12 +1960,12 @@ func main() {
 			m := mgr.Load()
 			var driver printers.Driver
 			if printerName != "" {
-				driver = m.FindByName(printerName)
+				driver = findPrinterByNameOrAlias(m, printerName)
 			}
 			if driver == nil {
 				target := loadSlicerTarget(settingsFile)
 				if target != "" {
-					driver = m.FindByName(target)
+					driver = findPrinterByNameOrAlias(m, target)
 				}
 			}
 			if driver == nil {
@@ -1972,12 +2035,12 @@ func main() {
 		m := mgr.Load()
 		var driver printers.Driver
 		if printerName != "" {
-			driver = m.FindByName(printerName)
+			driver = findPrinterByNameOrAlias(m, printerName)
 		}
 		if driver == nil {
 			target := loadSlicerTarget(settingsFile)
 			if target != "" {
-				driver = m.FindByName(target)
+				driver = findPrinterByNameOrAlias(m, target)
 			}
 		}
 		if driver == nil {
@@ -2311,7 +2374,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
+			_ = json.NewEncoder(w).Encode(applyAliases(mgr.Load().Statuses()))
 		case http.MethodPost:
 			var p printers.PrinterConfig
 			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -2339,37 +2402,64 @@ func main() {
 					m.Watchdog(context.Background())
 				}
 			}()
-			_ = json.NewEncoder(w).Encode(mgr.Load().Statuses())
+			_ = json.NewEncoder(w).Encode(applyAliases(mgr.Load().Statuses()))
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
 	})
 	mux.HandleFunc("/api/printers/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-			return
-		}
 		id := r.PathValue("id")
-		found := false
-		for i, p := range manualPrinters {
-			if p.ID == id {
-				manualPrinters = append(manualPrinters[:i], manualPrinters[i+1:]...)
-				found = true
-				break
+		switch r.Method {
+		case http.MethodPut, http.MethodPatch:
+			// Rename printer (set custom alias)
+			var body struct {
+				Name string `json:"name"`
 			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			printerAliasesMu.Lock()
+			if printerAliases == nil {
+				printerAliases = map[string]string{}
+			}
+			if body.Name == "" {
+				delete(printerAliases, id)
+			} else {
+				printerAliases[id] = body.Name
+			}
+			if err := savePrinterAliases(filepath.Join(settingsDir, "printer_aliases.json"), printerAliases); err != nil {
+				printerAliasesMu.Unlock()
+				http.Error(w, `{"error":"failed to save alias"}`, http.StatusInternalServerError)
+				return
+			}
+			printerAliasesMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(applyAliases(mgr.Load().Statuses()))
+		case http.MethodDelete:
+			found := false
+			for i, p := range manualPrinters {
+				if p.ID == id {
+					manualPrinters = append(manualPrinters[:i], manualPrinters[i+1:]...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
+				return
+			}
+			if err := saveManualPrinters(filepath.Join(settingsDir, "printers.json"), manualPrinters); err != nil {
+				log.Printf("save printers: %v", err)
+				http.Error(w, `{"error":"failed to save printers"}`, http.StatusInternalServerError)
+				return
+			}
+			mgr.Store(buildManager(cfg))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
-		if !found {
-			http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
-			return
-		}
-		if err := saveManualPrinters(filepath.Join(settingsDir, "printers.json"), manualPrinters); err != nil {
-			log.Printf("save printers: %v", err)
-			http.Error(w, `{"error":"failed to save printers"}`, http.StatusInternalServerError)
-			return
-		}
-		mgr.Store(buildManager(cfg))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 	})
 	mux.HandleFunc("/api/printers/{id}/status", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

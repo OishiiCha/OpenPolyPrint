@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { NavLink, Link, Outlet } from 'react-router-dom'
+import { NavLink, Link, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Printer,
@@ -20,6 +20,8 @@ import {
   Sparkles,
   BarChart3,
   Gauge,
+  Menu,
+  X,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { AIChatPane } from './AIChatSidebar'
@@ -122,12 +124,19 @@ export function Layout() {
   const [chatCollapsed, setChatCollapsed] = useState(() => {
     try { return localStorage.getItem('aiChatCollapsed') === 'true' } catch { return false }
   })
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const location = useLocation()
 
   const toggleChat = () => {
     const next = !chatCollapsed
     setChatCollapsed(next)
     try { localStorage.setItem('aiChatCollapsed', String(next)) } catch {}
   }
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname])
 
   useEffect(() => {
     const el = document.documentElement
@@ -154,13 +163,29 @@ export function Layout() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      <aside className="flex w-64 flex-col border-r border-slate-300 bg-slate-100 dark:border-slate-700 dark:bg-slate-950">
-        <Link to="/" className="flex items-center gap-3 px-6 py-5">
-          <img src="/logo.svg" alt="OpenPolyPrint" className="h-10 w-auto" />
-          <span className="text-2xl font-mono font-bold tracking-tight text-blue-600 dark:text-blue-400">
-            OpenPolyPrint
-          </span>
-        </Link>
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <aside className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-300 bg-slate-100 transition-transform duration-200 dark:border-slate-700 dark:bg-slate-950 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-center justify-between px-4 py-5">
+          <Link to="/" className="flex items-center gap-3">
+            <img src="/logo.svg" alt="OpenPolyPrint" className="h-8 w-auto lg:h-10" />
+            <span className="text-xl font-mono font-bold tracking-tight text-blue-600 dark:text-blue-400 lg:text-2xl">
+              OpenPolyPrint
+            </span>
+          </Link>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800 lg:hidden"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
           {navItems.filter((item) =>
@@ -179,8 +204,8 @@ export function Layout() {
                 }`
               }
             >
-              <item.icon className="h-5 w-5" />
-              {item.label}
+              <item.icon className="h-5 w-5 shrink-0" />
+              <span className="truncate">{item.label}</span>
             </NavLink>
           ))}
         </nav>
@@ -205,7 +230,23 @@ export function Layout() {
       </aside>
 
       <div className="flex flex-1 flex-col overflow-hidden bg-white dark:bg-slate-950">
-        <main className="flex-1 overflow-y-auto p-8">
+        {/* Mobile top bar with hamburger */}
+        <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 lg:hidden">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+          >
+            <Menu className="h-6 w-6" />
+          </button>
+          <Link to="/" className="flex items-center gap-2">
+            <img src="/logo.svg" alt="OpenPolyPrint" className="h-6 w-auto" />
+            <span className="text-lg font-mono font-bold tracking-tight text-blue-600 dark:text-blue-400">
+              OpenPolyPrint
+            </span>
+          </Link>
+        </div>
+
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>
