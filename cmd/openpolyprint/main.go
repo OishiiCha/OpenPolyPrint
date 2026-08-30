@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -187,19 +188,6 @@ func loadAutoRecord(path string) autoRecordConfig {
 		out = cfg.AutoRecord
 	}
 	return out
-}
-
-// loadSlicerTarget reads the configured default printer for slicer uploads.
-func loadSlicerTarget(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	var cfg struct {
-		SlicerTarget string `json:"slicerTarget"`
-	}
-	_ = json.Unmarshal(data, &cfg)
-	return cfg.SlicerTarget
 }
 
 func safeName(s string) string {
@@ -1808,28 +1796,11 @@ func main() {
 	}))
 
 	mux.HandleFunc("/api/printer", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		// Printer is specified via ?printer= query parameter, or falls back
-		// to the slicer target, then first available printer.
-		printerName := r.URL.Query().Get("printer")
+		// Return status of the first available printer (for OctoPrint compat).
 		var status printers.Status
-		if printerName != "" {
-			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
-				status, _ = d.Status()
-			}
-		}
-		if status.ID == "" {
-			target := loadSlicerTarget(settingsFile)
-			if target != "" {
-				if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
-					status, _ = d.Status()
-				}
-			}
-		}
-		if status.ID == "" {
-			statuses := mgr.Load().Statuses()
-			if len(statuses) > 0 {
-				status = statuses[0]
-			}
+		statuses := mgr.Load().Statuses()
+		if len(statuses) > 0 {
+			status = statuses[0]
 		}
 		stateText := "Offline"
 		if status.Online {
@@ -1866,26 +1837,10 @@ func main() {
 	}))
 
 	mux.HandleFunc("/api/job", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		printerName := r.URL.Query().Get("printer")
 		var status printers.Status
-		if printerName != "" {
-			if d := findPrinterByNameOrAlias(mgr.Load(), printerName); d != nil {
-				status, _ = d.Status()
-			}
-		}
-		if status.ID == "" {
-			target := loadSlicerTarget(settingsFile)
-			if target != "" {
-				if d := findPrinterByNameOrAlias(mgr.Load(), target); d != nil {
-					status, _ = d.Status()
-				}
-			}
-		}
-		if status.ID == "" {
-			statuses := mgr.Load().Statuses()
-			if len(statuses) > 0 {
-				status = statuses[0]
-			}
+		statuses := mgr.Load().Statuses()
+		if len(statuses) > 0 {
+			status = statuses[0]
 		}
 		stateText := "Offline"
 		if status.Online {
@@ -1941,7 +1896,9 @@ func main() {
 		})
 	}))
 
-	// OctoPrint file upload: POST /api/files/local or POST /api/files/{printer}/local
+	// OctoPrint file upload: POST /api/files/local
+	// Saves the G-code to the G-code store (unassigned). The user then
+	// assigns it to a printer in the OpenPolyPrint UI.
 	mux.HandleFunc("/api/files/", func(w http.ResponseWriter, r *http.Request) {
 		// CORS for browser-based slicer plugins (e.g. Cura)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1952,7 +1909,7 @@ func main() {
 			return
 		}
 
-		// GET /api/files or /api/files/local â€” return empty file list
+		// GET /api/files or /api/files/local — return empty file list
 		// (slicers often probe this before uploading)
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
@@ -1967,30 +1924,11 @@ func main() {
 			return
 		}
 
-		// Parse path. OctoPrint paths we support:
-		//   POST /api/files/local                      â†’ upload to default printer
-		//   POST /api/files/{printer}/local            â†’ upload to specific printer
-		//   POST /api/files/local/{filename}           â†’ select/start print (standard OctoPrint)
-		//   POST /api/files/{printer}/local/{filename} â†’ select/start on specific printer
+		// Parse path. Only standard OctoPrint paths:
+		//   POST /api/files/local            → upload (save to G-code store, unassigned)
+		//   POST /api/files/local/{filename} → select/start print (accept silently)
 		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/files/"), "/")
-
-		var printerName string
-		var isUpload bool
-
-		if len(pathParts) == 1 && pathParts[0] == "local" {
-			// /api/files/local â upload
-			isUpload = true
-		} else if len(pathParts) == 2 && pathParts[1] == "local" {
-			// /api/files/{printer}/local â upload
-			printerName = pathParts[0]
-			isUpload = true
-		} else if len(pathParts) == 2 && pathParts[0] == "local" {
-			// /api/files/local/{filename} â select (standard OctoPrint), accept silently
-		} else if len(pathParts) == 3 && pathParts[1] == "local" {
-			// /api/files/{printer}/local/{filename} â select on specific printer, accept silently
-			printerName = pathParts[0]
-		}
-		// All other paths: accept silently (file select)
+		isUpload := len(pathParts) == 1 && pathParts[0] == "local"
 
 		if isUpload {
 			// File upload via multipart form
@@ -2010,61 +1948,19 @@ func main() {
 				return
 			}
 
-			// Resolve target printer.
-			// 1. If printer name is in the URL path, use that.
-			// 2. Otherwise, use the configured slicer target.
-			// 3. Otherwise, fall back to the first available printer.
-			// This matches the standard OctoPrint API where /api/files/local
-			// uploads to the connected printer.
-			m := mgr.Load()
-			var driver printers.Driver
-			if printerName != "" {
-				driver = findPrinterByNameOrAlias(m, printerName)
-			}
-			if driver == nil {
-				target := loadSlicerTarget(settingsFile)
-				if target != "" {
-					driver = findPrinterByNameOrAlias(m, target)
-				}
-			}
-			if driver == nil {
-				for _, d := range m.Drivers() {
-					driver = d
-					break
-				}
-			}
-			if driver == nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"error": "no printer available",
-				})
-				return
-			}
-
 			filename := header.Filename
 			if filename == "" {
 				filename = "upload.gcode"
 			}
 
-			// Upload to printer
-			if err := driver.UploadGCode(r.Context(), filename, data); err != nil {
-				log.Printf("[slicer] upload %s to %s failed: %v", filename, driver.Name(), err)
-				http.Error(w, fmt.Sprintf(`{"error":"upload failed: %s"}`, err.Error()), http.StatusInternalServerError)
+			// Save to G-code store as unassigned (no printer ID).
+			// The user will assign it to a printer in the OpenPolyPrint UI.
+			if _, err := gcodeStore.Save(filename, "", bytes.NewReader(data)); err != nil {
+				log.Printf("[slicer] save %s to gcode store failed: %v", filename, err)
+				http.Error(w, fmt.Sprintf(`{"error":"save failed: %s"}`, err.Error()), http.StatusInternalServerError)
 				return
 			}
-			log.Printf("[slicer] uploaded %s (%d bytes) to %s", filename, len(data), driver.Name())
-
-			// Check if the slicer requested to start printing immediately.
-			// OctoPrint uses ?print=true as a URL query parameter.
-			printNow := r.URL.Query().Get("print") == "true" || r.FormValue("print") == "true"
-			if printNow {
-				if err := driver.StartPrint(r.Context(), filename); err != nil {
-					log.Printf("[slicer] start print %s on %s failed: %v", filename, driver.Name(), err)
-				} else {
-					log.Printf("[slicer] started print %s on %s", filename, driver.Name())
-				}
-			}
+			log.Printf("[slicer] saved %s (%d bytes) to gcode store (unassigned)", filename, len(data))
 
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Location", "/api/files/local/"+filename)
@@ -2085,10 +1981,9 @@ func main() {
 			return
 		}
 
-		// File select: POST /api/files/local/{filename} or /api/files/{printer}/local/{filename}
+		// File select: POST /api/files/local/{filename}
 		// with JSON body {"command":"select","print":true}
-		// Accept silently — the file was already sent to printer during upload
-		// (if print=true was passed during upload). This matches OpenMake's behavior.
+		// Accept silently — the user will start the print from the OpenPolyPrint UI.
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{})
 	})
