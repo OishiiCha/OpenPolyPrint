@@ -4,9 +4,10 @@ import {
   ArrowLeft, Upload, Trash2, Edit3, Download, Eye, Tag as TagIcon,
   Loader2, FileText, X, Search, Repeat, AlertTriangle, CheckCircle2,
   Sparkles, ChevronDown, ChevronRight, Settings as SettingsIcon,
-  Printer as PrinterIcon, Layers, Box, Split, FileOutput,
+  Printer as PrinterIcon, Layers, Box, Split, FileOutput, Save, Pencil,
 } from 'lucide-react'
 import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
+import { AIProfileEditor } from '../components/AIProfileEditor'
 
 type Category = 'filament' | 'print'
 
@@ -605,6 +606,14 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
   const [aiAnalyzing, setAiAnalyzing] = useState<IndividualProfile | null>(null)
   const [aiContext, setAiContext] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Manual edit mode
+  const [editMode, setEditMode] = useState(false)
+  const [editedValues, setEditedValues] = useState<Record<string, string>>({})
+  const [editNewName, setEditNewName] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  // AI suggest edits
+  const [aiEditorProfile, setAiEditorProfile] = useState<IndividualProfile | null>(null)
+  const [aiEditorOpen, setAiEditorOpen] = useState(false)
 
   // Detect format
   const isJSON = file.content?.trim().startsWith('{')
@@ -724,6 +733,109 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
     setAiContext(`Profile: ${profile.name}\nType: ${profile.type}\nSection: ${profile.section || 'N/A'}\nSettings: ${profile.settingCount}\nExtracted from: ${file.name}\n\n--- Profile Content ---\n${truncated}\n--- End Content ---`)
     setAiAnalyzing(profile)
   }
+
+  // AI suggest edits for an individual profile
+  const handleSuggestEdits = (profile: IndividualProfile) => {
+    setAiEditorProfile(profile)
+    setAiEditorOpen(true)
+  }
+
+  // AI suggest edits for the whole file (when no individual profiles)
+  const handleSuggestEditsWholeFile = () => {
+    setAiEditorProfile({
+      index: -1,
+      type: 'flat',
+      name: file.name,
+      section: '',
+      settingCount: totalSettings,
+      content: file.content || '',
+    })
+    setAiEditorOpen(true)
+  }
+
+  // Save from AI editor — creates a new profile file
+  const handleSaveFromAIEditor = async (newContent: string, newName: string) => {
+    const category = aiEditorProfile?.type === 'filament' ? 'filament' : 'print'
+    const res = await fetch('/api/profile-files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: newName,
+        filename: newName.replace(/\s+/g, '_') + '.ini',
+        category,
+        content: newContent,
+        slicer: file.slicer || 'prusaslicer',
+        tags: file.tags || [],
+        notes: `AI-optimized from: ${file.name}`,
+      }),
+    })
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({ error: 'Save failed' }))
+      throw new Error(d.error || 'Save failed')
+    }
+    onRefresh?.()
+  }
+
+  // Manual edit: build modified content from edited values
+  const getEditedContent = (): string => {
+    if (!file.content) return ''
+    if (Object.keys(editedValues).length === 0) return file.content
+    const lines = file.content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim()
+      if (trimmed.startsWith(';') || trimmed.startsWith('#') || trimmed.startsWith('[')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx <= 0) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      if (key in editedValues) {
+        const leadingWs = lines[i].slice(0, lines[i].length - lines[i].trimStart().length)
+        lines[i] = `${leadingWs}${key} = ${editedValues[key]}`
+      }
+    }
+    return lines.join('\n')
+  }
+
+  const handleSaveManualEdit = async () => {
+    setSavingEdit(true)
+    setError(null)
+    try {
+      const editedContent = getEditedContent()
+      const name = editNewName || `${file.name} (Edited)`
+      const category: Category = file.category
+      const res = await fetch('/api/profile-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          filename: name.replace(/\s+/g, '_') + '.ini',
+          category,
+          content: editedContent,
+          slicer: file.slicer || 'prusaslicer',
+          tags: file.tags || [],
+          notes: `Edited from: ${file.name}`,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'Save failed' }))
+        throw new Error(d.error || 'Save failed')
+      }
+      onRefresh?.()
+      setEditMode(false)
+      setEditedValues({})
+      setEditNewName('')
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const handleEditValueChange = (key: string, value: string) => {
+    setEditedValues(prev => ({ ...prev, [key]: value }))
+  }
+
+  const hasEdits = Object.keys(editedValues).length > 0
 
   // Category icon + color
   const categoryStyle = (section: string): { icon: typeof Layers; color: string; bg: string } => {
@@ -890,6 +1002,14 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                               AI
                             </button>
                             <button
+                              onClick={() => handleSuggestEdits(profile)}
+                              className="flex items-center gap-1 rounded-lg bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-2.5 py-1.5 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-500/20 hover:from-blue-600/30 hover:to-purple-600/30"
+                              title="AI Suggest Edits"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              AI Edit
+                            </button>
+                            <button
                               onClick={() => handleConvertProfile(profile)}
                               disabled={converting === profile.index}
                               className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
@@ -922,7 +1042,7 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
             ) : (
               /* ─── SETTINGS VIEW (existing) ─── */
               <>
-                {/* Search + view toggle */}
+                {/* Search + view toggle + edit mode */}
                 {!isJSON && sections.length > 0 && (
                   <>
                     <div className="mb-4 flex items-center gap-2">
@@ -936,6 +1056,26 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                           className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
+                      {/* AI Suggest Edits button */}
+                      <button
+                        onClick={handleSuggestEditsWholeFile}
+                        className="shrink-0 flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-3 py-2 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-500/20 hover:from-blue-600/30 hover:to-purple-600/30"
+                        title="Get AI-suggested edits"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> AI Edits
+                      </button>
+                      {/* Edit mode toggle */}
+                      <button
+                        onClick={() => setEditMode(!editMode)}
+                        className={`shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                          editMode
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        }`}
+                        title="Toggle edit mode"
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> {editMode ? 'Editing' : 'Edit'}
+                      </button>
                       <button
                         onClick={() => setShowRaw(!showRaw)}
                         className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
@@ -947,6 +1087,32 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                         {showRaw ? 'Parsed' : 'Raw'}
                       </button>
                     </div>
+
+                    {/* Edit mode save bar */}
+                    {editMode && (
+                      <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-700/50 bg-amber-900/10 px-4 py-3">
+                        <input
+                          type="text"
+                          value={editNewName}
+                          onChange={(e) => setEditNewName(e.target.value)}
+                          placeholder="New file name (e.g. My Profile (Edited))"
+                          className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <button
+                          onClick={handleSaveManualEdit}
+                          disabled={!hasEdits || savingEdit}
+                          className="flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                        >
+                          {savingEdit ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
+                          Save as New
+                          {hasEdits && ` (${Object.keys(editedValues).length})`}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Category tabs */}
                     {!showRaw && (
@@ -1023,16 +1189,29 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                                 {sec.keys.map((kv, i) => (
                                   <div
                                     key={i}
-                                    className="flex items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-slate-800/50"
+                                    className={`flex items-center gap-2 rounded px-2 py-1 font-mono text-xs ${
+                                      editMode && kv.key in editedValues
+                                        ? 'bg-amber-900/20 ring-1 ring-amber-700/30'
+                                        : 'hover:bg-slate-800/50'
+                                    }`}
                                   >
                                     <span className="shrink-0 text-slate-400">{kv.key}</span>
                                     <span className="text-slate-600">=</span>
-                                    <span
-                                      className="truncate text-slate-200"
-                                      title={kv.value}
-                                    >
-                                      {kv.value || '(empty)'}
-                                    </span>
+                                    {editMode ? (
+                                      <input
+                                        type="text"
+                                        value={kv.key in editedValues ? editedValues[kv.key] : kv.value}
+                                        onChange={(e) => handleEditValueChange(kv.key, e.target.value)}
+                                        className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+                                      />
+                                    ) : (
+                                      <span
+                                        className="truncate text-slate-200"
+                                        title={kv.value}
+                                      >
+                                        {kv.value || '(empty)'}
+                                      </span>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -1069,6 +1248,18 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
           sourceType="profile"
           defaultMessage={`Please analyze this ${aiAnalyzing.type} profile named "${aiAnalyzing.name}". Review the settings, identify any potential issues or suboptimal values, and suggest improvements for print quality, speed, or reliability.`}
           contextText={aiContext}
+        />
+      )}
+
+      {/* AI Profile Editor — structured suggestions with accept/reject */}
+      {aiEditorOpen && aiEditorProfile && (
+        <AIProfileEditor
+          open={aiEditorOpen}
+          onClose={() => { setAiEditorOpen(false); setAiEditorProfile(null) }}
+          content={aiEditorProfile.content}
+          profileName={aiEditorProfile.name}
+          profileType={aiEditorProfile.type}
+          onSave={handleSaveFromAIEditor}
         />
       )}
     </>

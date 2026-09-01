@@ -1147,6 +1147,64 @@ func main() {
 		http.Error(w, `{"error":"no camera frame available"}`, http.StatusNotFound)
 	})
 
+	// AI-suggested profile edits — asks Gemini to analyze a profile and return
+	// structured setting change suggestions that the user can accept/reject.
+	mux.HandleFunc("/api/ai/suggest-profile-edits", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Content     string `json:"content"`
+			ProfileName string `json:"profileName"`
+			ProfileType string `json:"profileType"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Content == "" {
+			http.Error(w, `{"error":"content required"}`, http.StatusBadRequest)
+			return
+		}
+
+		apiKey := resolveAPIKey(settingsFile)
+		if apiKey == "" {
+			http.Error(w, `{"error":"no Gemini API key configured"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Truncate very large profiles
+		content := req.Content
+		if len(content) > 50000 {
+			content = content[:50000] + "\n... (truncated)"
+		}
+
+		suggestions, rawText, err := ai.SuggestProfileEdits(apiKey, content, req.ProfileName, req.ProfileType)
+		if err != nil {
+			log.Printf("[ai] suggest-profile-edits failed: %v", err)
+			// If we have rawText, return it so the user sees something
+			if rawText != "" {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"suggestions": []ai.ProfileSuggestion{},
+					"rawText":     rawText,
+					"error":       err.Error(),
+				})
+				return
+			}
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			http.Error(w, string(errJSON), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"suggestions": suggestions,
+			"rawText":     rawText,
+		})
+	})
+
 	// Analyze with pre-captured image(s) — creates a chat conversation,
 	// saves the image(s), sends to Gemini, and returns the full conversation.
 	// Used by the dashboard "Ask AI" multi-snapshot feature.
@@ -2328,6 +2386,50 @@ func main() {
 			category := profilefiles.Category(r.URL.Query().Get("category"))
 			_ = json.NewEncoder(w).Encode(profileFilesStore.List(category))
 		case http.MethodPost:
+			// Check if this is a JSON request (content in body) or multipart (file upload)
+			contentType := r.Header.Get("Content-Type")
+			if strings.HasPrefix(contentType, "application/json") {
+				// JSON body: create profile from content string
+				var body struct {
+					Name     string   `json:"name"`
+					Filename string   `json:"filename"`
+					Category string   `json:"category"`
+					Content  string   `json:"content"`
+					Slicer   string   `json:"slicer"`
+					Notes    string   `json:"notes"`
+					Tags     []string `json:"tags"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+					return
+				}
+				if body.Content == "" {
+					http.Error(w, `{"error":"content required"}`, http.StatusBadRequest)
+					return
+				}
+				name := body.Name
+				if name == "" {
+					name = body.Filename
+				}
+				if name == "" {
+					name = "Untitled"
+				}
+				filename := body.Filename
+				if filename == "" {
+					filename = strings.ReplaceAll(name, " ", "_") + ".ini"
+				}
+				category := profilefiles.Category(body.Category)
+				if category != profilefiles.CategoryFilament && category != profilefiles.CategoryPrint {
+					category = profilefiles.CategoryPrint
+				}
+				pf, err := profileFilesStore.Add(name, filename, category, []byte(body.Content), body.Slicer, body.Tags, body.Notes)
+				if err != nil {
+					http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(pf)
+				return
+			}
 			// Multipart upload: file + metadata fields
 			if err := r.ParseMultipartForm(32 << 20); err != nil {
 				http.Error(w, `{"error":"failed to parse form: `+err.Error()+`"}`, http.StatusBadRequest)
