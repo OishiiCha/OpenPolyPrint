@@ -117,6 +117,21 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
     return () => window.removeEventListener('openpolyprint-analyze-gcode', handler)
   }, [collapsed, onToggle])
 
+  // Listen for "open chat" requests from AI analysis modals (dashboard, STL, profile)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { conversationId?: string }
+      if (detail?.conversationId) {
+        // Expand the sidebar if collapsed
+        if (collapsed) onToggle()
+        // Load the conversation
+        loadConversation(detail.conversationId)
+      }
+    }
+    window.addEventListener('openpolyprint-open-chat', handler)
+    return () => window.removeEventListener('openpolyprint-open-chat', handler)
+  }, [collapsed, onToggle])
+
   // Start a new conversation from setup
   const startNewChat = async () => {
     setError(null)

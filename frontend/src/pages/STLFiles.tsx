@@ -11,9 +11,11 @@ import {
   Box,
   Loader2,
   Save,
+  Sparkles,
 } from 'lucide-react'
 import { STLViewer } from '../components/STLViewer'
-import { STLThumbnail } from '../components/STLViewer'
+import { STLThumbnail, renderSTLScreenshot } from '../components/STLViewer'
+import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 
 interface STLFile {
   id: string
@@ -47,6 +49,9 @@ export function STLFiles() {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [viewing, setViewing] = useState<STLFile | null>(null)
   const [editing, setEditing] = useState<STLFile | null>(null)
+  const [aiAnalyzing, setAiAnalyzing] = useState<STLFile | null>(null)
+  const [aiScreenshot, setAiScreenshot] = useState<string | null>(null)
+  const [aiCapturing, setAiCapturing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const fetchAll = useCallback(() => {
@@ -82,6 +87,19 @@ export function STLFiles() {
     a.download = file?.filename || 'model.stl'
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleAskAI = async (f: STLFile) => {
+    setAiCapturing(true)
+    setAiScreenshot(null)
+    try {
+      const screenshot = await renderSTLScreenshot(`/api/stl-files/${f.id}`, 512, 512)
+      setAiScreenshot(screenshot)
+    } catch {
+      setAiScreenshot(null)
+    }
+    setAiCapturing(false)
+    setAiAnalyzing(f)
   }
 
   const handleUpload = async (files: File[], tags: string, notes: string) => {
@@ -205,6 +223,13 @@ export function STLFiles() {
                     <Download className="h-4 w-4" />
                   </button>
                   <button
+                    onClick={(e) => { e.stopPropagation(); handleAskAI(f) }}
+                    className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-blue-400"
+                    title="Ask AI"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </button>
+                  <button
                     onClick={(e) => { e.stopPropagation(); setEditing(f) }}
                     className="rounded-lg bg-slate-800/90 p-2 text-slate-300 hover:text-blue-400"
                     title="Edit"
@@ -270,6 +295,29 @@ export function STLFiles() {
       {/* Edit modal */}
       {editing && (
         <EditModal file={editing} onClose={() => setEditing(null)} onSaved={fetchAll} />
+      )}
+
+      {/* AI analysis modal */}
+      {aiAnalyzing && (
+        <AIAnalyzeModal
+          open={!!aiAnalyzing}
+          onClose={() => { setAiAnalyzing(null); setAiScreenshot(null) }}
+          title={`Analyze STL: ${aiAnalyzing.name}`}
+          sourceType="stl"
+          preCapturedImages={aiScreenshot ? [aiScreenshot] : []}
+          defaultMessage="Please analyze this 3D model. Identify the geometry, suggest optimal print orientation, recommend support structures if needed, estimate print difficulty, and provide recommended slicer settings (layer height, infill, speed, etc.)."
+          contextText={`STL file: ${aiAnalyzing.name}\nFilename: ${aiAnalyzing.filename}\nSize: ${formatSize(aiAnalyzing.size)}\nTags: ${(aiAnalyzing.tags || []).join(', ') || 'None'}\nNotes: ${aiAnalyzing.notes || 'None'}${aiScreenshot ? '' : '\n\n(No screenshot available — analyzing metadata only)'}`}
+        />
+      )}
+
+      {/* Screenshot capturing indicator */}
+      {aiCapturing && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60">
+          <div className="flex flex-col items-center gap-3 rounded-lg bg-slate-900 p-6">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+            <p className="text-sm text-slate-300">Rendering 3D model for AI analysis...</p>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Upload, Trash2, Edit3, Download, Eye, Tag as TagIcon,
   Loader2, FileText, X, Search, Repeat, AlertTriangle, CheckCircle2,
+  Sparkles,
 } from 'lucide-react'
+import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 
 type Category = 'filament' | 'print'
 
@@ -62,6 +64,7 @@ export function ProfileFiles() {
   const [editing, setEditing] = useState<ProfileFile | null>(null)
   const [converting, setConverting] = useState<ProfileFile | null>(null)
   const [convertOpen, setConvertOpen] = useState(false)
+  const [aiAnalyzing, setAiAnalyzing] = useState<ProfileFile | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
@@ -99,6 +102,24 @@ export function ProfileFiles() {
     const res = await fetch(`/api/profile-files/${id}/view`)
     const data = await res.json()
     setViewing(data)
+  }
+
+  const [aiContext, setAiContext] = useState('')
+  const handleAskAI = async (f: ProfileFile) => {
+    try {
+      const res = await fetch(`/api/profile-files/${f.id}/view`)
+      if (res.ok) {
+        const data = await res.json()
+        const content = data.content || data.text || ''
+        const truncated = content.length > 30000 ? content.slice(0, 30000) + '\n... (truncated)' : content
+        setAiContext(`Profile file: ${f.name}\nFilename: ${f.filename}\nSlicer: ${f.slicer || 'Unknown'}\nTags: ${(f.tags || []).join(', ') || 'None'}\nNotes: ${f.notes || 'None'}\n\n--- File Content ---\n${truncated}\n--- End File Content ---`)
+      } else {
+        setAiContext(`Profile file: ${f.name}\nFilename: ${f.filename}\nSlicer: ${f.slicer || 'Unknown'}\nTags: ${(f.tags || []).join(', ') || 'None'}\nNotes: ${f.notes || 'None'}\n(Could not load file content)`)
+      }
+    } catch {
+      setAiContext(`Profile file: ${f.name}\nFilename: ${f.filename}\nSlicer: ${f.slicer || 'Unknown'}\nTags: ${(f.tags || []).join(', ') || 'None'}\nNotes: ${f.notes || 'None'}\n(Could not load file content)`)
+    }
+    setAiAnalyzing(f)
   }
 
   const filtered = files.filter((f) => {
@@ -219,6 +240,9 @@ export function ProfileFiles() {
                   <button onClick={() => { setConverting(f); setConvertOpen(true) }} className="rounded p-1 text-slate-400 hover:text-purple-500" title="Convert">
                     <Repeat className="h-4 w-4" />
                   </button>
+                  <button onClick={() => handleAskAI(f)} className="rounded p-1 text-slate-400 hover:text-blue-500" title="Ask AI">
+                    <Sparkles className="h-4 w-4" />
+                  </button>
                   <button onClick={() => setEditing(f)} className="rounded p-1 text-slate-400 hover:text-blue-500" title="Edit">
                     <Edit3 className="h-4 w-4" />
                   </button>
@@ -287,6 +311,18 @@ export function ProfileFiles() {
           category={activeTab}
           onClose={() => { setConvertOpen(false); setConverting(null) }}
           onConverted={() => { setConvertOpen(false); setConverting(null); fetchAll() }}
+        />
+      )}
+
+      {/* AI analysis modal */}
+      {aiAnalyzing && (
+        <AIAnalyzeModal
+          open={!!aiAnalyzing}
+          onClose={() => { setAiAnalyzing(null); setAiContext('') }}
+          title={`Analyze profile: ${aiAnalyzing.name}`}
+          sourceType="profile"
+          defaultMessage="Please analyze this slicer profile file. Review the settings, identify any potential issues or suboptimal values, and suggest improvements for print quality, speed, or reliability."
+          contextText={aiContext}
         />
       )}
     </div>

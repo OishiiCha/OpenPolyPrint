@@ -8,6 +8,7 @@ import { GCodePreview } from '../components/GCodePreview'
 import { CameraStream } from '../components/CameraStream'
 import { AutoScrollText } from '../components/AutoScrollText'
 import { TempChart } from '../components/TempChart'
+import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import {
   Camera as CameraIcon,
@@ -205,6 +206,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [aiAnalyzeOpen, setAiAnalyzeOpen] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
   const { renamePrinter } = usePrinters()
 
@@ -442,7 +444,31 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
             )}
           </div>
         )}
+
+        {/* Ask AI button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setAiAnalyzeOpen(true)
+          }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600/10 to-purple-600/10 px-3 py-2 text-sm font-medium text-blue-600 ring-1 ring-inset ring-blue-600/20 transition-colors hover:from-blue-600/20 hover:to-purple-600/20 dark:text-blue-400 dark:ring-blue-500/20"
+        >
+          <Sparkles className="h-4 w-4" /> Ask AI
+        </button>
       </Card>
+
+      {aiAnalyzeOpen && (
+        <AIAnalyzeModal
+          open={aiAnalyzeOpen}
+          onClose={() => setAiAnalyzeOpen(false)}
+          title={`Analyze ${printer.name}`}
+          sourceType="printer"
+          printerId={printer.id}
+          printerName={printer.name}
+          defaultMessage="Please analyze the printer status and camera images. Check for any print issues, suggest improvements, and provide a status summary."
+          contextText={`Printer: ${printer.name}\nStatus: ${printer.status}\nNozzle: ${printer.temps.nozzle}°C / ${printer.temps.targetNozzle}°C\nBed: ${printer.temps.bed}°C / ${printer.temps.targetBed}°C\nProgress: ${printer.progress}%\nFile: ${printer.currentFile || 'N/A'}\nLayer: ${printer.layerNum || 0}/${printer.layerCount || 0}`}
+        />
+      )}
 
       {showConfirm && (
         <ConfirmModal

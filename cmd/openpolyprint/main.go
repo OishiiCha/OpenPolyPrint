@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1124,6 +1125,157 @@ func main() {
 	})
 
 	// ── AI Chat: live printer analysis with camera frames ─────────────
+	// Capture a single camera frame as JPEG for AI analysis (multi-snapshot).
+	mux.HandleFunc("/api/ai/snapshot/{printerId}", func(w http.ResponseWriter, r *http.Request) {
+		printerID := r.PathValue("printerId")
+		for _, cam := range cameraMgr.Store().GetCameras() {
+			if !cam.Enabled || cam.PrinterID != printerID {
+				continue
+			}
+			if cam.Type != "usb" && cam.Type != "rpicam" {
+				continue
+			}
+			frameData := cameraMgr.Streamers().GetFrameForCamera(cam.ID)
+			if frameData == nil {
+				continue
+			}
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Write(frameData)
+			return
+		}
+		http.Error(w, `{"error":"no camera frame available"}`, http.StatusNotFound)
+	})
+
+	// Analyze with pre-captured image(s) — creates a chat conversation,
+	// saves the image(s), sends to Gemini, and returns the full conversation.
+	// Used by the dashboard "Ask AI" multi-snapshot feature.
+	mux.HandleFunc("/api/ai/analyze", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			PrinterID   string   `json:"printerId"`
+			PrinterName string   `json:"printerName"`
+			Images      []string `json:"images"`     // base64-encoded JPEG images
+			Message     string   `json:"message"`    // user's prompt
+			Context     string   `json:"context"`    // extra context text (printer data, file content, etc.)
+			SourceType  string   `json:"sourceType"` // "printer", "profile", "stl"
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		apiKey := resolveAPIKey(settingsFile)
+		if apiKey == "" {
+			http.Error(w, `{"error":"no Gemini API key configured"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Create a new conversation
+		conv := chatStore.Create(req.PrinterID, req.PrinterName, "")
+
+		// Save images and build message
+		var imagePaths []string
+		for _, b64 := range req.Images {
+			imgData, err := base64.StdEncoding.DecodeString(b64)
+			if err != nil {
+				continue
+			}
+			relPath, err := chatStore.SaveImage(conv.ID, imgData, ".jpg")
+			if err != nil {
+				continue
+			}
+			imagePaths = append(imagePaths, relPath)
+		}
+
+		// Build the system prompt based on source type
+		systemPrompt := "You are a 3D printing expert assistant. "
+		switch req.SourceType {
+		case "printer":
+			systemPrompt += "The user is sharing live camera snapshots from their 3D printer along with printer status data. Analyze the images and data to identify any issues, suggest improvements, and provide helpful advice about the print quality and printer status."
+		case "profile":
+			systemPrompt += "The user is sharing a slicer profile file for analysis. Review the settings and provide recommendations for optimization, print quality improvements, and any potential issues."
+		case "stl":
+			systemPrompt += "The user is sharing a screenshot of a 3D model (STL file). Analyze the model geometry, orientation, and suggest optimal print settings, supports, and any potential printing challenges."
+		default:
+			systemPrompt += "Analyze the provided information and help the user with their 3D printing questions."
+		}
+
+		msgText := systemPrompt + "\n\n" + req.Message
+		if req.Context != "" {
+			msgText += "\n\n" + req.Context
+		}
+
+		// Save user message
+		userMsg := ai.ChatMessage{
+			Role:      "user",
+			Text:      msgText,
+			Timestamp: time.Now(),
+		}
+		if len(imagePaths) > 0 {
+			userMsg.HasImage = true
+			userMsg.ImagePaths = imagePaths
+			userMsg.ImageMime = "image/jpeg"
+		}
+		_ = chatStore.AddMessage(conv.ID, userMsg)
+
+		// Build Gemini request
+		conv = chatStore.Get(conv.ID)
+		var geminiMsgs []ai.ChatMessageForAPI
+		for _, msg := range conv.Messages {
+			parts := []ai.ChatPart{{Text: msg.Text}}
+			if msg.HasImage {
+				for _, imgPath := range msg.ImagePaths {
+					imgData, err := os.ReadFile(chatStore.ImagePath(imgPath))
+					if err != nil {
+						continue
+					}
+					parts = append(parts, ai.ChatPart{
+						InlineData: &struct {
+							MimeType string `json:"mimeType"`
+							Data     string `json:"data"`
+						}{
+							MimeType: msg.ImageMime,
+							Data:     ai.EncodeImageBase64(imgData),
+						},
+					})
+				}
+			}
+			geminiMsgs = append(geminiMsgs, ai.ChatMessageForAPI{
+				Role:  msg.Role,
+				Parts: parts,
+			})
+		}
+
+		chatReq := ai.ChatRequest{
+			APIKey:   apiKey,
+			Messages: geminiMsgs,
+		}
+		result, err := ai.Chat(chatReq)
+		if err != nil {
+			log.Printf("[ai] analyze failed: %v", err)
+			_ = chatStore.AddMessage(conv.ID, ai.ChatMessage{
+				Role:      "model",
+				Text:      fmt.Sprintf("Error: %s", err.Error()),
+				Timestamp: time.Now(),
+			})
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			http.Error(w, string(errJSON), http.StatusInternalServerError)
+			return
+		}
+
+		_ = chatStore.AddMessage(conv.ID, ai.ChatMessage{
+			Role:      "model",
+			Text:      result.Text,
+			Timestamp: time.Now(),
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(chatStore.Get(conv.ID))
+	})
+
 	// Start a new empty chat conversation, optionally linked to a printer.
 	mux.HandleFunc("/api/ai/chat/start", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
