@@ -132,7 +132,7 @@ export function AIAnalyzeModal({
     setPhase('analyzing')
     setErrorMsg('')
     try {
-      const res = await fetch('/api/ai/analyze', {
+      const res = await fetch('/api/ai/analyze-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

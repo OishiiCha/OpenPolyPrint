@@ -1150,7 +1150,7 @@ func main() {
 	// Analyze with pre-captured image(s) — creates a chat conversation,
 	// saves the image(s), sends to Gemini, and returns the full conversation.
 	// Used by the dashboard "Ask AI" multi-snapshot feature.
-	mux.HandleFunc("/api/ai/analyze", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/ai/analyze-image", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
