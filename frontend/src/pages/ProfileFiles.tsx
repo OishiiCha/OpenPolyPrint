@@ -4,7 +4,7 @@ import {
   ArrowLeft, Upload, Trash2, Edit3, Download, Eye, Tag as TagIcon,
   Loader2, FileText, X, Search, Repeat, AlertTriangle, CheckCircle2,
   Sparkles, ChevronDown, ChevronRight, Settings as SettingsIcon,
-  Printer as PrinterIcon, Layers, Box,
+  Printer as PrinterIcon, Layers, Box, Split, FileOutput,
 } from 'lucide-react'
 import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 
@@ -21,6 +21,15 @@ interface ProfileFile {
   notes?: string
   content?: string
   uploadedAt: number
+}
+
+interface IndividualProfile {
+  index: number
+  type: string       // "print", "filament", "printer", "flat"
+  name: string       // profile name from section header
+  section: string    // full section header
+  settingCount: number
+  content: string    // INI text for just this profile
 }
 
 const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white'
@@ -420,7 +429,7 @@ export function ProfileFiles() {
 
       {/* View modal */}
       {viewing && (
-        <ViewModal file={viewing} onClose={() => setViewing(null)} />
+        <ViewModal file={viewing} onClose={() => setViewing(null)} onRefresh={fetchAll} />
       )}
 
       {/* Edit modal */}
@@ -581,16 +590,53 @@ function UploadModal({ category, onClose, onUploaded }: { category: Category; on
   )
 }
 
-function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }) {
+function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: () => void; onRefresh?: () => void }) {
   const sections = file.content ? parseINI(file.content) : []
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState<string>('all')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [showRaw, setShowRaw] = useState(false)
+  const [viewMode, setViewMode] = useState<'settings' | 'profiles'>('settings')
+  const [profiles, setProfiles] = useState<IndividualProfile[]>([])
+  const [profilesLoading, setProfilesLoading] = useState(false)
+  const [expandedProfile, setExpandedProfile] = useState<number | null>(null)
+  const [extracting, setExtracting] = useState<number | null>(null)
+  const [converting, setConverting] = useState<number | null>(null)
+  const [aiAnalyzing, setAiAnalyzing] = useState<IndividualProfile | null>(null)
+  const [aiContext, setAiContext] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   // Detect format
   const isJSON = file.content?.trim().startsWith('{')
   const totalSettings = sections.reduce((sum, s) => sum + s.keys.length, 0)
+
+  // Load individual profiles when switching to profiles view
+  useEffect(() => {
+    if (viewMode !== 'profiles' || profiles.length > 0) return
+    setProfilesLoading(true)
+    setError(null)
+    fetch(`/api/profile-files/${file.id}/profiles`)
+      .then(r => r.json())
+      .then(data => {
+        setProfiles(Array.isArray(data) ? data : [])
+        if (Array.isArray(data) && data.length > 1) {
+          // If there are multiple profiles, default to profiles view
+        }
+      })
+      .catch(() => setError('Failed to load profiles'))
+      .finally(() => setProfilesLoading(false))
+  }, [viewMode, file.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-switch to profiles view if multiple profiles detected
+  useEffect(() => {
+    if (!isJSON && file.content) {
+      // Quick check: count section headers
+      const sectionCount = (file.content.match(/^\[.+\]$/gm) || []).length
+      if (sectionCount > 1 && viewMode === 'settings') {
+        // Don't auto-switch, but show a badge
+      }
+    }
+  }, [file.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Get category stats
   const categoryStats = sections.map(s => ({ section: s.section, count: s.keys.length }))
@@ -618,6 +664,67 @@ function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }
     })
   }
 
+  const handleExtract = async (profile: IndividualProfile) => {
+    setExtracting(profile.index)
+    setError(null)
+    try {
+      const res = await fetch(`/api/profile-files/${file.id}/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileIndex: profile.index,
+          newName: profile.name,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'Extract failed' }))
+        throw new Error(d.error || 'Extract failed')
+      }
+      onRefresh?.()
+      // Show success
+      setExtracting(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Extract failed')
+      setExtracting(null)
+    }
+  }
+
+  const handleConvertProfile = async (profile: IndividualProfile) => {
+    setConverting(profile.index)
+    setError(null)
+    try {
+      const res = await fetch('/api/profile-files/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: file.id,
+          target: 'orcaslicer',
+          save: true,
+          profileIndex: profile.index,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'Convert failed' }))
+        throw new Error(d.error || 'Convert failed')
+      }
+      const result = await res.json()
+      onRefresh?.()
+      setConverting(null)
+      // Show a simple success message
+      setError(null)
+      alert(`Converted to OrcaSlicer: ${result.profiles?.length || 1} profile(s) generated. ${result.warnings?.join('; ') || ''}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Convert failed')
+      setConverting(null)
+    }
+  }
+
+  const handleAnalyzeProfile = async (profile: IndividualProfile) => {
+    const truncated = profile.content.length > 30000 ? profile.content.slice(0, 30000) + '\n... (truncated)' : profile.content
+    setAiContext(`Profile: ${profile.name}\nType: ${profile.type}\nSection: ${profile.section || 'N/A'}\nSettings: ${profile.settingCount}\nExtracted from: ${file.name}\n\n--- Profile Content ---\n${truncated}\n--- End Content ---`)
+    setAiAnalyzing(profile)
+  }
+
   // Category icon + color
   const categoryStyle = (section: string): { icon: typeof Layers; color: string; bg: string } => {
     switch (section) {
@@ -634,184 +741,337 @@ function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }
     }
   }
 
+  // Profile type icon + color
+  const profileTypeStyle = (type: string): { icon: typeof Layers; color: string; bg: string } => {
+    switch (type) {
+      case 'print':
+        return { icon: Layers, color: 'text-blue-400', bg: 'bg-blue-500/10' }
+      case 'filament':
+        return { icon: Box, color: 'text-amber-400', bg: 'bg-amber-500/10' }
+      case 'printer':
+        return { icon: PrinterIcon, color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
+      default:
+        return { icon: FileText, color: 'text-slate-400', bg: 'bg-slate-500/10' }
+    }
+  }
+
+  const sectionCount = file.content ? (file.content.match(/^\[.+\]$/gm) || []).length : 0
+
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
-      <div
-        className="dark flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-mono text-lg font-semibold text-blue-400">{file.name}</h2>
-            <p className="truncate text-xs text-slate-500">
-              {file.filename} · {formatSize(file.size)}
-              {totalSettings > 0 && ` · ${totalSettings} settings`}
-            </p>
-          </div>
-          <button onClick={onClose} className="shrink-0 rounded p-1 text-slate-400 hover:text-white">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Tags + metadata bar */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/50 px-6 py-3">
-          {file.slicer && (
-            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-              {file.slicer}
-            </span>
-          )}
-          {file.tags && file.tags.map((tag) => (
-            <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-              {tag}
-            </span>
-          ))}
-          {file.notes && (
-            <span className="truncate text-xs text-slate-500" title={file.notes}>
-              {file.notes}
-            </span>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Search + view toggle */}
-          {!isJSON && sections.length > 0 && (
-            <>
-              <div className="mb-4 flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search settings..."
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <button
-                  onClick={() => setShowRaw(!showRaw)}
-                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                    showRaw
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                  }`}
-                >
-                  {showRaw ? 'Parsed' : 'Raw'}
-                </button>
-              </div>
-
-              {/* Category tabs */}
-              {!showRaw && (
-                <div className="mb-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => setActiveCategory('all')}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                      activeCategory === 'all'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                    }`}
-                  >
-                    All ({totalSettings})
-                  </button>
-                  {categoryStats.map(cs => (
-                    <button
-                      key={cs.section}
-                      onClick={() => setActiveCategory(cs.section)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                        activeCategory === cs.section
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                      }`}
-                    >
-                      {cs.section} ({cs.count})
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Content display */}
-          {isJSON ? (
-            // JSON file display
-            <div>
-              <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
-                {file.content}
-              </pre>
+    <>
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+        <div
+          className="dark flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate font-mono text-lg font-semibold text-blue-400">{file.name}</h2>
+              <p className="truncate text-xs text-slate-500">
+                {file.filename} · {formatSize(file.size)}
+                {totalSettings > 0 && ` · ${totalSettings} settings`}
+                {sectionCount > 1 && ` · ${sectionCount} profiles`}
+              </p>
             </div>
-          ) : showRaw ? (
-            // Raw INI display
-            <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
-              {file.content}
-            </pre>
-          ) : sections.length > 0 ? (
-            // Parsed INI display with collapsible sections
-            <div className="space-y-3">
-              {filteredSections.map((sec) => {
-                const style = categoryStyle(sec.section)
-                const Icon = style.icon
-                const isCollapsed = collapsedSections.has(sec.section)
-                return (
-                  <div key={sec.section} className={`rounded-lg border ${style.bg} overflow-hidden`}>
-                    <button
-                      onClick={() => toggleSection(sec.section)}
-                      className="flex w-full items-center justify-between px-4 py-2.5 text-left"
-                    >
-                      <div className="flex items-center gap-2">
-                        {isCollapsed ? (
-                          <ChevronRight className="h-4 w-4 text-slate-500" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4 text-slate-500" />
-                        )}
-                        <Icon className={`h-4 w-4 ${style.color}`} />
-                        <span className={`font-mono text-sm font-semibold ${style.color}`}>
-                          {sec.section}
-                        </span>
-                        <span className="text-xs text-slate-500">
-                          ({sec.keys.length})
-                        </span>
-                      </div>
-                    </button>
-                    {!isCollapsed && (
-                      <div className="border-t border-slate-800/50 p-3">
-                        <div className="grid gap-1 sm:grid-cols-2">
-                          {sec.keys.map((kv, i) => (
-                            <div
-                              key={i}
-                              className="flex items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-slate-800/50"
-                            >
-                              <span className="shrink-0 text-slate-400">{kv.key}</span>
-                              <span className="text-slate-600">=</span>
-                              <span
-                                className="truncate text-slate-200"
-                                title={kv.value}
-                              >
-                                {kv.value || '(empty)'}
+            <button onClick={onClose} className="shrink-0 rounded p-1 text-slate-400 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Tags + metadata bar */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/50 px-6 py-3">
+            {file.slicer && (
+              <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                {file.slicer}
+              </span>
+            )}
+            {file.tags && file.tags.map((tag) => (
+              <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                {tag}
+              </span>
+            ))}
+            {file.notes && (
+              <span className="truncate text-xs text-slate-500" title={file.notes}>
+                {file.notes}
+              </span>
+            )}
+          </div>
+
+          {/* View mode tabs (only for INI files with sections) */}
+          {!isJSON && sectionCount > 1 && (
+            <div className="flex gap-1 border-b border-slate-800/50 px-6 py-2">
+              <button
+                onClick={() => setViewMode('settings')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === 'settings' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                <SettingsIcon className="mr-1 inline h-3.5 w-3.5" /> All Settings
+              </button>
+              <button
+                onClick={() => setViewMode('profiles')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === 'profiles' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                <Split className="mr-1 inline h-3.5 w-3.5" /> Individual Profiles ({sectionCount})
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="mx-6 mt-3 rounded-lg border border-rose-700 bg-rose-900/20 p-3 text-sm text-rose-400">
+              {error}
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* ─── PROFILES VIEW ─── */}
+            {viewMode === 'profiles' && !isJSON ? (
+              profilesLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+                </div>
+              ) : profiles.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-400">
+                    {profiles.length} individual profile{profiles.length !== 1 ? 's' : ''} found in this file.
+                    Each can be extracted to a new file, analyzed with AI, or converted separately.
+                  </p>
+                  {profiles.map((profile) => {
+                    const style = profileTypeStyle(profile.type)
+                    const Icon = style.icon
+                    const isExpanded = expandedProfile === profile.index
+                    return (
+                      <div key={profile.index} className={`rounded-lg border border-slate-700 ${style.bg} overflow-hidden`}>
+                        {/* Profile header */}
+                        <div className="flex items-center justify-between px-4 py-3">
+                          <button
+                            onClick={() => setExpandedProfile(isExpanded ? null : profile.index)}
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+                            )}
+                            <Icon className={`h-4 w-4 shrink-0 ${style.color}`} />
+                            <div className="min-w-0">
+                              <span className={`block truncate text-sm font-medium ${style.color}`}>
+                                {profile.name}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {profile.type} · {profile.settingCount} settings
                               </span>
                             </div>
-                          ))}
+                          </button>
+                          {/* Action buttons */}
+                          <div className="flex shrink-0 gap-1">
+                            <button
+                              onClick={() => handleExtract(profile)}
+                              disabled={extracting === profile.index}
+                              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                              title="Extract to new file"
+                            >
+                              {extracting === profile.index ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <FileOutput className="h-3.5 w-3.5" />
+                              )}
+                              Extract
+                            </button>
+                            <button
+                              onClick={() => handleAnalyzeProfile(profile)}
+                              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700"
+                              title="Analyze with AI"
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              AI
+                            </button>
+                            <button
+                              onClick={() => handleConvertProfile(profile)}
+                              disabled={converting === profile.index}
+                              className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+                              title="Convert to OrcaSlicer"
+                            >
+                              {converting === profile.index ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Repeat className="h-3.5 w-3.5" />
+                              )}
+                              Convert
+                            </button>
+                          </div>
                         </div>
+                        {/* Expanded profile content */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-800/50 p-3">
+                            <pre className="max-h-64 overflow-auto rounded bg-slate-900 p-3 font-mono text-xs text-slate-300">
+                              {profile.content}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No individual profiles found.</p>
+              )
+            ) : (
+              /* ─── SETTINGS VIEW (existing) ─── */
+              <>
+                {/* Search + view toggle */}
+                {!isJSON && sections.length > 0 && (
+                  <>
+                    <div className="mb-4 flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                        <input
+                          type="text"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="Search settings..."
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <button
+                        onClick={() => setShowRaw(!showRaw)}
+                        className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                          showRaw
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        }`}
+                      >
+                        {showRaw ? 'Parsed' : 'Raw'}
+                      </button>
+                    </div>
+
+                    {/* Category tabs */}
+                    {!showRaw && (
+                      <div className="mb-4 flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setActiveCategory('all')}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            activeCategory === 'all'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                          }`}
+                        >
+                          All ({totalSettings})
+                        </button>
+                        {categoryStats.map(cs => (
+                          <button
+                            key={cs.section}
+                            onClick={() => setActiveCategory(cs.section)}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                              activeCategory === cs.section
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                            }`}
+                          >
+                            {cs.section} ({cs.count})
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Content display */}
+                {isJSON ? (
+                  <div>
+                    <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
+                      {file.content}
+                    </pre>
+                  </div>
+                ) : showRaw ? (
+                  <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
+                    {file.content}
+                  </pre>
+                ) : sections.length > 0 ? (
+                  <div className="space-y-3">
+                    {filteredSections.map((sec) => {
+                      const style = categoryStyle(sec.section)
+                      const Icon = style.icon
+                      const isCollapsed = collapsedSections.has(sec.section)
+                      return (
+                        <div key={sec.section} className={`rounded-lg border ${style.bg} overflow-hidden`}>
+                          <button
+                            onClick={() => toggleSection(sec.section)}
+                            className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isCollapsed ? (
+                                <ChevronRight className="h-4 w-4 text-slate-500" />
+                              ) : (
+                                <ChevronDown className="h-4 w-4 text-slate-500" />
+                              )}
+                              <Icon className={`h-4 w-4 ${style.color}`} />
+                              <span className={`font-mono text-sm font-semibold ${style.color}`}>
+                                {sec.section}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                ({sec.keys.length})
+                              </span>
+                            </div>
+                          </button>
+                          {!isCollapsed && (
+                            <div className="border-t border-slate-800/50 p-3">
+                              <div className="grid gap-1 sm:grid-cols-2">
+                                {sec.keys.map((kv, i) => (
+                                  <div
+                                    key={i}
+                                    className="flex items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-slate-800/50"
+                                  >
+                                    <span className="shrink-0 text-slate-400">{kv.key}</span>
+                                    <span className="text-slate-600">=</span>
+                                    <span
+                                      className="truncate text-slate-200"
+                                      title={kv.value}
+                                    >
+                                      {kv.value || '(empty)'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {filteredSections.length === 0 && search && (
+                      <div className="py-8 text-center text-sm text-slate-500">
+                        No settings match "{search}"
                       </div>
                     )}
                   </div>
-                )
-              })}
-              {filteredSections.length === 0 && search && (
-                <div className="py-8 text-center text-sm text-slate-500">
-                  No settings match "{search}"
-                </div>
-              )}
-            </div>
-          ) : file.content ? (
-            <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
-              {file.content}
-            </pre>
-          ) : (
-            <p className="text-sm text-slate-500">No content available</p>
-          )}
+                ) : file.content ? (
+                  <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
+                    {file.content}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-slate-500">No content available</p>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* AI Analysis modal for individual profile */}
+      {aiAnalyzing && (
+        <AIAnalyzeModal
+          open={!!aiAnalyzing}
+          onClose={() => { setAiAnalyzing(null); setAiContext('') }}
+          title={`Analyze profile: ${aiAnalyzing.name}`}
+          sourceType="profile"
+          defaultMessage={`Please analyze this ${aiAnalyzing.type} profile named "${aiAnalyzing.name}". Review the settings, identify any potential issues or suboptimal values, and suggest improvements for print quality, speed, or reliability.`}
+          contextText={aiContext}
+        />
+      )}
+    </>
   )
 }
 

@@ -2446,6 +2446,229 @@ func main() {
 		})
 	})
 
+	// List individual profiles within a multi-profile INI file
+	mux.HandleFunc("/api/profile-files/{id}/profiles", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		pf, err := profileFilesStore.Get(id)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+
+		content := pf.Content
+		if content == "" {
+			http.Error(w, `{"error":"no content"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Parse the INI into sections
+		type profileInfo struct {
+			Index        int    `json:"index"`
+			Type         string `json:"type"`    // "print", "filament", "printer", "flat"
+			Name         string `json:"name"`    // profile name from section header
+			Section      string `json:"section"` // full section header (e.g. "print:0.2mm Standard")
+			SettingCount int    `json:"settingCount"`
+			Content      string `json:"content"` // the INI text for just this profile
+		}
+
+		var profiles []profileInfo
+
+		// Try sectioned INI first
+		hasSections := false
+		var currentSection string
+		var currentKeys []string
+		var currentContent strings.Builder
+
+		flushSection := func() {
+			if currentSection == "" {
+				return
+			}
+			pType := "unknown"
+			pName := currentSection
+			if idx := strings.Index(currentSection, ":"); idx > 0 {
+				pType = strings.TrimSpace(currentSection[:idx])
+				pName = strings.TrimSpace(currentSection[idx+1:])
+			}
+			profiles = append(profiles, profileInfo{
+				Index:        len(profiles),
+				Type:         pType,
+				Name:         pName,
+				Section:      currentSection,
+				SettingCount: len(currentKeys),
+				Content:      currentContent.String(),
+			})
+		}
+
+		for _, line := range strings.Split(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				hasSections = true
+				flushSection()
+				currentSection = trimmed[1 : len(trimmed)-1]
+				currentKeys = nil
+				currentContent.Reset()
+				currentContent.WriteString(line + "\n")
+				continue
+			}
+			if currentSection != "" {
+				if trimmed != "" && !strings.HasPrefix(trimmed, ";") && !strings.HasPrefix(trimmed, "#") {
+					if idx := strings.Index(trimmed, "="); idx > 0 {
+						currentKeys = append(currentKeys, trimmed[:idx])
+					}
+				}
+				currentContent.WriteString(line + "\n")
+			}
+		}
+		flushSection()
+
+		// If no sections found, treat the whole file as a single flat profile
+		if !hasSections {
+			settingCount := 0
+			for _, line := range strings.Split(content, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "" || strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "#") {
+					continue
+				}
+				if idx := strings.Index(trimmed, "="); idx > 0 {
+					settingCount++
+				}
+			}
+			profiles = []profileInfo{{
+				Index:        0,
+				Type:         "flat",
+				Name:         pf.Name,
+				Section:      "",
+				SettingCount: settingCount,
+				Content:      content,
+			}}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(profiles)
+	})
+
+	// Extract a single profile from a multi-profile INI as a new profile file
+	mux.HandleFunc("/api/profile-files/{id}/extract", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		pf, err := profileFilesStore.Get(id)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+
+		var req struct {
+			ProfileIndex int    `json:"profileIndex"`
+			NewName      string `json:"newName"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Re-parse to get the profile content at the given index
+		content := pf.Content
+		if content == "" {
+			http.Error(w, `{"error":"no content"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Parse sections
+		var sections []struct {
+			header string
+			body   strings.Builder
+		}
+		var current *struct {
+			header string
+			body   strings.Builder
+		}
+		for _, line := range strings.Split(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				if current != nil {
+					sections = append(sections, *current)
+				}
+				current = &struct {
+					header string
+					body   strings.Builder
+				}{header: trimmed[1 : len(trimmed)-1]}
+				current.body.WriteString(line + "\n")
+				continue
+			}
+			if current != nil {
+				current.body.WriteString(line + "\n")
+			}
+		}
+		if current != nil {
+			sections = append(sections, *current)
+		}
+
+		// If no sections, the whole file is one profile
+		var extractContent string
+		var extractName string
+		if len(sections) == 0 {
+			if req.ProfileIndex != 0 {
+				http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
+				return
+			}
+			extractContent = content
+			extractName = req.NewName
+		} else {
+			if req.ProfileIndex < 0 || req.ProfileIndex >= len(sections) {
+				http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
+				return
+			}
+			sec := sections[req.ProfileIndex]
+			extractContent = strings.TrimRight(sec.body.String(), "\n") + "\n"
+			// Derive name from section header if not provided
+			extractName = req.NewName
+			if extractName == "" {
+				name := sec.header
+				if idx := strings.Index(name, ":"); idx > 0 {
+					name = strings.TrimSpace(name[idx+1:])
+				}
+				extractName = name
+			}
+		}
+
+		if extractName == "" {
+			extractName = "Extracted Profile"
+		}
+
+		// Determine category from section type
+		category := profilefiles.CategoryPrint
+		headerLower := strings.ToLower(extractName)
+		if strings.Contains(headerLower, "filament") {
+			category = profilefiles.CategoryFilament
+		}
+
+		// Save as a new profile file
+		newPF, err := profileFilesStore.Add(
+			extractName,
+			strings.ReplaceAll(extractName, " ", "_")+".ini",
+			category,
+			[]byte(extractContent),
+			pf.Slicer,
+			pf.Tags,
+			fmt.Sprintf("Extracted from: %s", pf.Name),
+		)
+		if err != nil {
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			http.Error(w, string(errJSON), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(newPF)
+	})
+
 	mux.HandleFunc("/api/profile-files/tags", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -2529,10 +2752,11 @@ func main() {
 		} else {
 			// JSON body: convert an existing stored file by ID
 			var body struct {
-				ID       string `json:"id"`
-				Target   string `json:"target"`
-				Save     bool   `json:"save"`
-				Category string `json:"category"`
+				ID           string `json:"id"`
+				Target       string `json:"target"`
+				Save         bool   `json:"save"`
+				Category     string `json:"category"`
+				ProfileIndex *int   `json:"profileIndex"` // optional: convert only this profile from a multi-profile INI
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -2548,7 +2772,57 @@ func main() {
 				http.Error(w, `{"error":"invalid target format"}`, http.StatusBadRequest)
 				return
 			}
-			result, err := profileconverter.Convert(pf.Content, pf.Filename, target)
+
+			// If profileIndex is specified, extract just that profile's content
+			convertContent := pf.Content
+			convertFilename := pf.Filename
+			if body.ProfileIndex != nil {
+				// Parse sections to get the profile at the given index
+				var sections []struct {
+					header string
+					body   strings.Builder
+				}
+				var current *struct {
+					header string
+					body   strings.Builder
+				}
+				for _, line := range strings.Split(pf.Content, "\n") {
+					trimmed := strings.TrimSpace(line)
+					if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+						if current != nil {
+							sections = append(sections, *current)
+						}
+						current = &struct {
+							header string
+							body   strings.Builder
+						}{header: trimmed[1 : len(trimmed)-1]}
+						current.body.WriteString(line + "\n")
+						continue
+					}
+					if current != nil {
+						current.body.WriteString(line + "\n")
+					}
+				}
+				if current != nil {
+					sections = append(sections, *current)
+				}
+
+				idx := *body.ProfileIndex
+				if idx < 0 || idx >= len(sections) {
+					http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
+					return
+				}
+				sec := sections[idx]
+				convertContent = strings.TrimRight(sec.body.String(), "\n") + "\n"
+				// Derive a filename from the section name
+				secName := sec.header
+				if i := strings.Index(secName, ":"); i > 0 {
+					secName = strings.TrimSpace(secName[i+1:])
+				}
+				convertFilename = strings.ReplaceAll(secName, " ", "_") + ".ini"
+			}
+
+			result, err := profileconverter.Convert(convertContent, convertFilename, target)
 			if err != nil {
 				http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
 				return
