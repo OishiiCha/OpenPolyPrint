@@ -2653,7 +2653,300 @@ func main() {
 		_ = json.NewEncoder(w).Encode(profiles)
 	})
 
-	// Extract a single profile from a multi-profile INI as a new profile file
+	// Save a modified profile as a complete config bundle (for AI editor / manual edit).
+	// Takes the modified profile content + optional newName, and builds a valid
+	// eufyMake config bundle with header, associated filament/printer sections, and presets.
+	mux.HandleFunc("/api/profile-files/{id}/save-bundle", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		pf, err := profileFilesStore.Get(id)
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+
+		var req struct {
+			Content      string `json:"content"`      // modified profile content (single section)
+			NewName      string `json:"newName"`      // new profile name
+			ProfileIndex *int   `json:"profileIndex"` // which profile was edited (for finding associated sections)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Content == "" {
+			http.Error(w, `{"error":"content required"}`, http.StatusBadRequest)
+			return
+		}
+
+		origContent := pf.Content
+
+		// Parse the modified content to get the section header
+		modSecType := "print"
+		modSecName := req.NewName
+		for _, line := range strings.Split(req.Content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				hdr := trimmed[1 : len(trimmed)-1]
+				if idx := strings.Index(hdr, ":"); idx > 0 {
+					modSecType = strings.TrimSpace(hdr[:idx])
+					if req.NewName == "" {
+						modSecName = strings.TrimSpace(hdr[idx+1:])
+					}
+				} else {
+					modSecType = hdr
+					if req.NewName == "" {
+						modSecName = hdr
+					}
+				}
+				break
+			}
+		}
+
+		// If newName is provided, replace the section header in the modified content
+		bundleContent := req.Content
+		if req.NewName != "" && (modSecType == "print" || modSecType == "filament" || modSecType == "printer") {
+			// Find the section header line and replace it
+			lines := strings.Split(bundleContent, "\n")
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+					lines[i] = "[" + modSecType + ":" + req.NewName + "]"
+					break
+				}
+			}
+			bundleContent = strings.Join(lines, "\n")
+		}
+
+		// Parse original file sections to find associated profiles
+		type origSection struct {
+			header string
+			body   string
+		}
+		var origSections []origSection
+		var curHeader string
+		var curBody strings.Builder
+		hasSections := false
+		for _, line := range strings.Split(origContent, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				hasSections = true
+				if curHeader != "" {
+					origSections = append(origSections, origSection{curHeader, strings.TrimRight(curBody.String(), "\n") + "\n"})
+				}
+				curHeader = trimmed[1 : len(trimmed)-1]
+				curBody.Reset()
+				curBody.WriteString(line + "\n")
+				continue
+			}
+			if curHeader != "" {
+				curBody.WriteString(line + "\n")
+			}
+		}
+		if curHeader != "" {
+			origSections = append(origSections, origSection{curHeader, strings.TrimRight(curBody.String(), "\n") + "\n"})
+		}
+
+		// Extract header comment
+		var headerComment string
+		if hasSections {
+			for _, line := range strings.Split(origContent, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+					break
+				}
+				if trimmed != "" {
+					headerComment += line + "\n"
+				}
+			}
+		}
+
+		// If the original file had no sections, just save the content as-is
+		if !hasSections || len(origSections) == 0 {
+			saveName := req.NewName
+			if saveName == "" {
+				saveName = pf.Name + " (Edited)"
+			}
+			category := profilefiles.CategoryPrint
+			newPF, err := profileFilesStore.Add(
+				saveName,
+				strings.ReplaceAll(saveName, " ", "_")+".ini",
+				category,
+				[]byte(req.Content),
+				pf.Slicer,
+				pf.Tags,
+				fmt.Sprintf("Edited from: %s", pf.Name),
+			)
+			if err != nil {
+				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+				http.Error(w, string(errJSON), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(newPF)
+			return
+		}
+
+		// Parse original presets
+		var origPresetsPrint, origPresetsFilament, origPresetsPrinter string
+		for _, sec := range origSections {
+			if sec.header == "presets" {
+				for _, line := range strings.Split(sec.body, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "print = ") {
+						origPresetsPrint = strings.TrimPrefix(line, "print = ")
+					} else if strings.HasPrefix(line, "filament = ") {
+						origPresetsFilament = strings.TrimPrefix(line, "filament = ")
+					} else if strings.HasPrefix(line, "printer = ") {
+						origPresetsPrinter = strings.TrimPrefix(line, "printer = ")
+					}
+				}
+			}
+		}
+
+		// Build the bundle
+		var bundle strings.Builder
+		if headerComment != "" {
+			bundle.WriteString(headerComment + "\n")
+		}
+		bundle.WriteString(bundleContent)
+
+		// Set preset values
+		presetPrint := ""
+		presetFilament := ""
+		presetPrinter := ""
+		switch modSecType {
+		case "print":
+			presetPrint = modSecName
+		case "filament":
+			presetFilament = modSecName
+		case "printer":
+			presetPrinter = modSecName
+		}
+
+		// Include one profile of each missing type (prefer presets match)
+		for _, sec := range origSections {
+			if sec.header == "presets" {
+				continue
+			}
+			st := "unknown"
+			sn := sec.header
+			if idx := strings.Index(sec.header, ":"); idx > 0 {
+				st = strings.TrimSpace(sec.header[:idx])
+				sn = strings.TrimSpace(sec.header[idx+1:])
+			}
+			includeThis := false
+			switch modSecType {
+			case "print":
+				if st == "filament" && presetFilament == "" {
+					if sn == origPresetsFilament || origPresetsFilament == "" {
+						presetFilament = sn
+						includeThis = true
+					}
+				} else if st == "printer" && presetPrinter == "" {
+					if sn == origPresetsPrinter || origPresetsPrinter == "" {
+						presetPrinter = sn
+						includeThis = true
+					}
+				}
+			case "filament":
+				if st == "print" && presetPrint == "" {
+					if sn == origPresetsPrint || origPresetsPrint == "" {
+						presetPrint = sn
+						includeThis = true
+					}
+				} else if st == "printer" && presetPrinter == "" {
+					if sn == origPresetsPrinter || origPresetsPrinter == "" {
+						presetPrinter = sn
+						includeThis = true
+					}
+				}
+			case "printer":
+				if st == "print" && presetPrint == "" {
+					if sn == origPresetsPrint || origPresetsPrint == "" {
+						presetPrint = sn
+						includeThis = true
+					}
+				} else if st == "filament" && presetFilament == "" {
+					if sn == origPresetsFilament || origPresetsFilament == "" {
+						presetFilament = sn
+						includeThis = true
+					}
+				}
+			}
+			if includeThis {
+				bundle.WriteString("\n" + sec.body)
+			}
+		}
+
+		// If still missing, include first available of each type
+		if presetPrint == "" || presetFilament == "" || presetPrinter == "" {
+			for _, sec := range origSections {
+				if sec.header == "presets" {
+					continue
+				}
+				st := "unknown"
+				sn := sec.header
+				if idx := strings.Index(sec.header, ":"); idx > 0 {
+					st = strings.TrimSpace(sec.header[:idx])
+					sn = strings.TrimSpace(sec.header[idx+1:])
+				}
+				if st == "print" && presetPrint == "" {
+					presetPrint = sn
+					bundle.WriteString("\n" + sec.body)
+				} else if st == "filament" && presetFilament == "" {
+					presetFilament = sn
+					bundle.WriteString("\n" + sec.body)
+				} else if st == "printer" && presetPrinter == "" {
+					presetPrinter = sn
+					bundle.WriteString("\n" + sec.body)
+				}
+			}
+		}
+
+		// Add [presets] section
+		bundle.WriteString("\n[presets]\n")
+		bundle.WriteString(fmt.Sprintf("print = %s\n", presetPrint))
+		bundle.WriteString("sla_print = \n")
+		bundle.WriteString("sla_material = \n")
+		bundle.WriteString(fmt.Sprintf("printer = %s\n", presetPrinter))
+		bundle.WriteString(fmt.Sprintf("filament = %s\n", presetFilament))
+
+		// Determine category and save
+		category := profilefiles.CategoryPrint
+		if modSecType == "filament" {
+			category = profilefiles.CategoryFilament
+		}
+		saveName := req.NewName
+		if saveName == "" {
+			saveName = modSecName + " (Edited)"
+		}
+
+		newPF, err := profileFilesStore.Add(
+			saveName,
+			strings.ReplaceAll(saveName, " ", "_")+".ini",
+			category,
+			[]byte(bundle.String()),
+			pf.Slicer,
+			pf.Tags,
+			fmt.Sprintf("Edited from: %s", pf.Name),
+		)
+		if err != nil {
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			http.Error(w, string(errJSON), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(newPF)
+	})
+
+	// Extract a single profile from a multi-profile INI as a new profile file.
+	// Builds a complete config bundle (header + print + filament + printer + presets)
+	// so the result can be imported back into eufyMake/AnkerMake Studio.
 	mux.HandleFunc("/api/profile-files/{id}/extract", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -2675,79 +2968,259 @@ func main() {
 			return
 		}
 
-		// Re-parse to get the profile content at the given index
 		content := pf.Content
 		if content == "" {
 			http.Error(w, `{"error":"no content"}`, http.StatusBadRequest)
 			return
 		}
 
-		// Parse sections
-		var sections []struct {
-			header string
-			body   strings.Builder
+		// Parse all sections from the original file
+		type section struct {
+			header string // e.g. "print:PETG"
+			body   string // full section text including [header] line
 		}
-		var current *struct {
-			header string
-			body   strings.Builder
-		}
+		var sections []section
+		var currentHeader string
+		var currentBody strings.Builder
+		hasSections := false
 		for _, line := range strings.Split(content, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-				if current != nil {
-					sections = append(sections, *current)
+				hasSections = true
+				if currentHeader != "" {
+					sections = append(sections, section{currentHeader, strings.TrimRight(currentBody.String(), "\n") + "\n"})
 				}
-				current = &struct {
-					header string
-					body   strings.Builder
-				}{header: trimmed[1 : len(trimmed)-1]}
-				current.body.WriteString(line + "\n")
+				currentHeader = trimmed[1 : len(trimmed)-1]
+				currentBody.Reset()
+				currentBody.WriteString(line + "\n")
 				continue
 			}
-			if current != nil {
-				current.body.WriteString(line + "\n")
+			if currentHeader != "" {
+				currentBody.WriteString(line + "\n")
 			}
 		}
-		if current != nil {
-			sections = append(sections, *current)
+		if currentHeader != "" {
+			sections = append(sections, section{currentHeader, strings.TrimRight(currentBody.String(), "\n") + "\n"})
+		}
+
+		// Extract the header comment (lines before first section)
+		var headerComment string
+		if hasSections {
+			for _, line := range strings.Split(content, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+					break
+				}
+				if trimmed != "" {
+					headerComment += line + "\n"
+				}
+			}
 		}
 
 		// If no sections, the whole file is one profile
-		var extractContent string
-		var extractName string
 		if len(sections) == 0 {
 			if req.ProfileIndex != 0 {
 				http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
 				return
 			}
-			extractContent = content
-			extractName = req.NewName
-		} else {
-			if req.ProfileIndex < 0 || req.ProfileIndex >= len(sections) {
-				http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
+			extractName := req.NewName
+			if extractName == "" {
+				extractName = pf.Name
+			}
+			category := profilefiles.CategoryPrint
+			newPF, err := profileFilesStore.Add(
+				extractName,
+				strings.ReplaceAll(extractName, " ", "_")+".ini",
+				category,
+				[]byte(content),
+				pf.Slicer,
+				pf.Tags,
+				fmt.Sprintf("Extracted from: %s", pf.Name),
+			)
+			if err != nil {
+				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+				http.Error(w, string(errJSON), http.StatusInternalServerError)
 				return
 			}
-			sec := sections[req.ProfileIndex]
-			extractContent = strings.TrimRight(sec.body.String(), "\n") + "\n"
-			// Derive name from section header if not provided
-			extractName = req.NewName
-			if extractName == "" {
-				name := sec.header
-				if idx := strings.Index(name, ":"); idx > 0 {
-					name = strings.TrimSpace(name[idx+1:])
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(newPF)
+			return
+		}
+
+		if req.ProfileIndex < 0 || req.ProfileIndex >= len(sections) {
+			http.Error(w, `{"error":"invalid profile index"}`, http.StatusBadRequest)
+			return
+		}
+
+		selectedSec := sections[req.ProfileIndex]
+		// Determine the type and name from the section header
+		secType := "unknown"
+		secName := selectedSec.header
+		if idx := strings.Index(selectedSec.header, ":"); idx > 0 {
+			secType = strings.TrimSpace(selectedSec.header[:idx])
+			secName = strings.TrimSpace(selectedSec.header[idx+1:])
+		}
+
+		extractName := req.NewName
+		if extractName == "" {
+			extractName = secName
+		}
+
+		// Build a complete config bundle for eufyMake import.
+		// Include the selected profile plus associated profiles of other types.
+		var bundle strings.Builder
+		// 1. Header comment
+		if headerComment != "" {
+			bundle.WriteString(headerComment + "\n")
+		}
+		// 2. Selected section (rename if newName provided and it's a print/filament/printer)
+		newSecName := secName
+		if req.NewName != "" && (secType == "print" || secType == "filament" || secType == "printer") {
+			newSecName = req.NewName
+		}
+		if newSecName != secName {
+			// Replace the section header line
+			secBody := selectedSec.body
+			secBody = strings.Replace(secBody, "["+selectedSec.header+"]", "["+secType+":"+newSecName+"]", 1)
+			bundle.WriteString(secBody)
+		} else {
+			bundle.WriteString(selectedSec.body)
+		}
+
+		// 3. Find and include associated profiles of other types
+		// If extracting a print profile, include filament and printer profiles
+		// If extracting a filament, include print and printer
+		// If extracting a printer, include print and filament
+		var presetPrint, presetFilament, presetPrinter string
+		presetPrint = ""
+		presetFilament = ""
+		presetPrinter = ""
+
+		switch secType {
+		case "print":
+			presetPrint = newSecName
+		case "filament":
+			presetFilament = newSecName
+		case "printer":
+			presetPrinter = newSecName
+		}
+
+		// Parse presets from original file if available
+		var origPresetsPrint, origPresetsFilament, origPresetsPrinter string
+		for _, sec := range sections {
+			if sec.header == "presets" {
+				for _, line := range strings.Split(sec.body, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "print = ") {
+						origPresetsPrint = strings.TrimPrefix(line, "print = ")
+					} else if strings.HasPrefix(line, "filament = ") {
+						origPresetsFilament = strings.TrimPrefix(line, "filament = ")
+					} else if strings.HasPrefix(line, "printer = ") {
+						origPresetsPrinter = strings.TrimPrefix(line, "printer = ")
+					}
 				}
-				extractName = name
 			}
 		}
 
-		if extractName == "" {
-			extractName = "Extracted Profile"
+		// Include one profile of each missing type
+		for _, sec := range sections {
+			if sec.header == "presets" {
+				continue
+			}
+			st := "unknown"
+			sn := sec.header
+			if idx := strings.Index(sec.header, ":"); idx > 0 {
+				st = strings.TrimSpace(sec.header[:idx])
+				sn = strings.TrimSpace(sec.header[idx+1:])
+			}
+			// Skip the selected section (already added)
+			if sec.header == selectedSec.header {
+				continue
+			}
+			// Include profiles of types we need
+			includeThis := false
+			switch secType {
+			case "print":
+				if st == "filament" && presetFilament == "" {
+					// Prefer the presets filament, otherwise first filament
+					if sn == origPresetsFilament || origPresetsFilament == "" {
+						presetFilament = sn
+						includeThis = true
+					}
+				} else if st == "printer" && presetPrinter == "" {
+					if sn == origPresetsPrinter || origPresetsPrinter == "" {
+						presetPrinter = sn
+						includeThis = true
+					}
+				}
+			case "filament":
+				if st == "print" && presetPrint == "" {
+					if sn == origPresetsPrint || origPresetsPrint == "" {
+						presetPrint = sn
+						includeThis = true
+					}
+				} else if st == "printer" && presetPrinter == "" {
+					if sn == origPresetsPrinter || origPresetsPrinter == "" {
+						presetPrinter = sn
+						includeThis = true
+					}
+				}
+			case "printer":
+				if st == "print" && presetPrint == "" {
+					if sn == origPresetsPrint || origPresetsPrint == "" {
+						presetPrint = sn
+						includeThis = true
+					}
+				} else if st == "filament" && presetFilament == "" {
+					if sn == origPresetsFilament || origPresetsFilament == "" {
+						presetFilament = sn
+						includeThis = true
+					}
+				}
+			}
+			if includeThis {
+				bundle.WriteString("\n" + sec.body)
+			}
 		}
 
-		// Determine category from section type
+		// If we still don't have all three, include the first available of each type
+		if presetPrint == "" || presetFilament == "" || presetPrinter == "" {
+			for _, sec := range sections {
+				if sec.header == "presets" || sec.header == selectedSec.header {
+					continue
+				}
+				st := "unknown"
+				sn := sec.header
+				if idx := strings.Index(sec.header, ":"); idx > 0 {
+					st = strings.TrimSpace(sec.header[:idx])
+					sn = strings.TrimSpace(sec.header[idx+1:])
+				}
+				if st == "print" && presetPrint == "" {
+					presetPrint = sn
+					bundle.WriteString("\n" + sec.body)
+				} else if st == "filament" && presetFilament == "" {
+					presetFilament = sn
+					bundle.WriteString("\n" + sec.body)
+				} else if st == "printer" && presetPrinter == "" {
+					presetPrinter = sn
+					bundle.WriteString("\n" + sec.body)
+				}
+			}
+		}
+
+		// 4. Add [presets] section
+		bundle.WriteString("\n[presets]\n")
+		bundle.WriteString(fmt.Sprintf("print = %s\n", presetPrint))
+		bundle.WriteString("sla_print = \n")
+		bundle.WriteString("sla_material = \n")
+		bundle.WriteString(fmt.Sprintf("printer = %s\n", presetPrinter))
+		bundle.WriteString(fmt.Sprintf("filament = %s\n", presetFilament))
+
+		extractContent := bundle.String()
+
+		// Determine category
 		category := profilefiles.CategoryPrint
-		headerLower := strings.ToLower(extractName)
-		if strings.Contains(headerLower, "filament") {
+		if secType == "filament" {
 			category = profilefiles.CategoryFilament
 		}
 

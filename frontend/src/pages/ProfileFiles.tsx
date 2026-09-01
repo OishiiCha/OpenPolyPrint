@@ -755,18 +755,15 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
 
   // Save from AI editor — creates a new profile file
   const handleSaveFromAIEditor = async (newContent: string, newName: string) => {
-    const category = aiEditorProfile?.type === 'filament' ? 'filament' : 'print'
-    const res = await fetch('/api/profile-files', {
+    // Use the save-bundle endpoint to produce a valid eufyMake config bundle
+    // (includes header, associated filament/printer sections, and presets)
+    const res = await fetch(`/api/profile-files/${file.id}/save-bundle`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: newName,
-        filename: newName.replace(/\s+/g, '_') + '.ini',
-        category,
         content: newContent,
-        slicer: file.slicer || 'prusaslicer',
-        tags: file.tags || [],
-        notes: `AI-optimized from: ${file.name}`,
+        newName: newName,
+        profileIndex: aiEditorProfile?.index ?? undefined,
       }),
     })
     if (!res.ok) {
@@ -801,18 +798,13 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
     try {
       const editedContent = getEditedContent()
       const name = editNewName || `${file.name} (Edited)`
-      const category: Category = file.category
-      const res = await fetch('/api/profile-files', {
+      // Use save-bundle endpoint to produce a valid eufyMake config bundle
+      const res = await fetch(`/api/profile-files/${file.id}/save-bundle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          filename: name.replace(/\s+/g, '_') + '.ini',
-          category,
           content: editedContent,
-          slicer: file.slicer || 'prusaslicer',
-          tags: file.tags || [],
-          notes: `Edited from: ${file.name}`,
+          newName: name,
         }),
       })
       if (!res.ok) {
