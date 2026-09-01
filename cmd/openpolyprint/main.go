@@ -2960,8 +2960,11 @@ func main() {
 		}
 
 		var req struct {
-			ProfileIndex int    `json:"profileIndex"`
-			NewName      string `json:"newName"`
+			ProfileIndex  int    `json:"profileIndex"`
+			NewName       string `json:"newName"`
+			FilamentIndex *int   `json:"filamentIndex"` // optional: which filament to include in bundle
+			PrinterIndex  *int   `json:"printerIndex"`  // optional: which printer to include in bundle
+			SingleOnly    bool   `json:"singleOnly"`    // if true, export just the one section (no bundle)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -3087,6 +3090,32 @@ func main() {
 			bundle.WriteString(selectedSec.body)
 		}
 
+		// If singleOnly mode, just save this one section (no bundle)
+		if req.SingleOnly {
+			extractContent := bundle.String()
+			category := profilefiles.CategoryPrint
+			if secType == "filament" {
+				category = profilefiles.CategoryFilament
+			}
+			newPF, err := profileFilesStore.Add(
+				extractName,
+				strings.ReplaceAll(extractName, " ", "_")+".ini",
+				category,
+				[]byte(extractContent),
+				pf.Slicer,
+				pf.Tags,
+				fmt.Sprintf("Extracted from: %s (single section)", pf.Name),
+			)
+			if err != nil {
+				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+				http.Error(w, string(errJSON), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(newPF)
+			return
+		}
+
 		// 3. Find and include associated profiles of other types
 		// If extracting a print profile, include filament and printer profiles
 		// If extracting a filament, include print and printer
@@ -3122,7 +3151,38 @@ func main() {
 			}
 		}
 
-		// Include one profile of each missing type
+		// If user specified a filamentIndex or printerIndex, use those specific profiles
+		// Build a map of section index -> section for easy lookup
+		// (sections list is already indexed by position)
+		// Include user-specified filament/printer
+		if req.FilamentIndex != nil && *req.FilamentIndex >= 0 && *req.FilamentIndex < len(sections) {
+			fSec := sections[*req.FilamentIndex]
+			fType := "unknown"
+			fName := fSec.header
+			if idx := strings.Index(fSec.header, ":"); idx > 0 {
+				fType = strings.TrimSpace(fSec.header[:idx])
+				fName = strings.TrimSpace(fSec.header[idx+1:])
+			}
+			if fType == "filament" && fSec.header != selectedSec.header {
+				presetFilament = fName
+				bundle.WriteString("\n" + fSec.body)
+			}
+		}
+		if req.PrinterIndex != nil && *req.PrinterIndex >= 0 && *req.PrinterIndex < len(sections) {
+			pSec := sections[*req.PrinterIndex]
+			pType := "unknown"
+			pName := pSec.header
+			if idx := strings.Index(pSec.header, ":"); idx > 0 {
+				pType = strings.TrimSpace(pSec.header[:idx])
+				pName = strings.TrimSpace(pSec.header[idx+1:])
+			}
+			if pType == "printer" && pSec.header != selectedSec.header {
+				presetPrinter = pName
+				bundle.WriteString("\n" + pSec.body)
+			}
+		}
+
+		// Include one profile of each missing type (if not already specified by user)
 		for _, sec := range sections {
 			if sec.header == "presets" {
 				continue

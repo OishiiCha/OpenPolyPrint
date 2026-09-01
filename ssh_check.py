@@ -11,17 +11,18 @@ def run(cmd, timeout=30):
     if safe.strip():
         print(safe)
 
-# Get the presets section
-run("curl -sk https://localhost/api/profile-files/pf_1788083988828603412 2>&1 | grep -A 20 '^\\[presets\\]'", timeout=30)
+# Check the remaining file's structure
+print("=== PETG (AI Optimized) - section headers ===\n")
+run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | grep -E '^#|^\\['", timeout=30)
 
-print("\n=== FULL FILE FIRST/LAST LINES ===\n")
-run("curl -sk https://localhost/api/profile-files/pf_1788083988828603412 2>&1 | head -5", timeout=30)
-run("curl -sk https://localhost/api/profile-files/pf_1788083988828603412 2>&1 | tail -20", timeout=30)
+print("\n=== First 5 lines ===\n")
+run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | head -5", timeout=30)
 
-print("\n=== AI OPTIMIZED FILE (extracted) ===\n")
-# Check what the AI optimized file looks like
-run("curl -sk https://localhost/api/profile-files/pf_1788257621793410642 2>&1 | head -30", timeout=30)
-run("curl -sk https://localhost/api/profile-files/pf_1788257621793410642 2>&1 | tail -10", timeout=30)
+print("\n=== Last 10 lines ===\n")
+run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | tail -10", timeout=30)
+
+print("\n=== Presets section ===\n")
+run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | grep -A 6 '^\\[presets\\]'", timeout=30)
 
 client.close()
 print("DONE")

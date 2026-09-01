@@ -614,6 +614,14 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
   // AI suggest edits
   const [aiEditorProfile, setAiEditorProfile] = useState<IndividualProfile | null>(null)
   const [aiEditorOpen, setAiEditorOpen] = useState(false)
+  // Extract options modal
+  const [extractOptions, setExtractOptions] = useState<{
+    profile: IndividualProfile
+    newName: string
+    filamentIndex: number
+    printerIndex: number
+    singleOnly: boolean
+  } | null>(null)
 
   // Detect format
   const isJSON = file.content?.trim().startsWith('{')
@@ -673,7 +681,12 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
     })
   }
 
-  const handleExtract = async (profile: IndividualProfile) => {
+  const handleExtract = async (profile: IndividualProfile, opts?: {
+    filamentIndex?: number
+    printerIndex?: number
+    singleOnly?: boolean
+    newName?: string
+  }) => {
     setExtracting(profile.index)
     setError(null)
     try {
@@ -682,7 +695,10 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profileIndex: profile.index,
-          newName: profile.name,
+          newName: opts?.newName || profile.name,
+          filamentIndex: opts?.filamentIndex,
+          printerIndex: opts?.printerIndex,
+          singleOnly: opts?.singleOnly || false,
         }),
       })
       if (!res.ok) {
@@ -690,8 +706,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
         throw new Error(d.error || 'Extract failed')
       }
       onRefresh?.()
-      // Show success
       setExtracting(null)
+      setExtractOptions(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Extract failed')
       setExtracting(null)
@@ -973,7 +989,13 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                           {/* Action buttons */}
                           <div className="flex shrink-0 gap-1">
                             <button
-                              onClick={() => handleExtract(profile)}
+                              onClick={() => setExtractOptions({
+                                profile,
+                                newName: profile.name,
+                                filamentIndex: -1,
+                                printerIndex: -1,
+                                singleOnly: false,
+                              })}
                               disabled={extracting === profile.index}
                               className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
                               title="Extract to new file"
@@ -1254,7 +1276,189 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
           onSave={handleSaveFromAIEditor}
         />
       )}
+
+      {/* Extract options modal */}
+      {extractOptions && (
+        <ExtractOptionsModal
+          options={extractOptions}
+          profiles={profiles}
+          extracting={extracting === extractOptions.profile.index}
+          onChange={setExtractOptions}
+          onConfirm={() => handleExtract(extractOptions.profile, {
+            filamentIndex: extractOptions.filamentIndex >= 0 ? extractOptions.filamentIndex : undefined,
+            printerIndex: extractOptions.printerIndex >= 0 ? extractOptions.printerIndex : undefined,
+            singleOnly: extractOptions.singleOnly,
+            newName: extractOptions.newName,
+          })}
+          onClose={() => setExtractOptions(null)}
+        />
+      )}
     </>
+  )
+}
+
+function ExtractOptionsModal({
+  options,
+  profiles,
+  extracting,
+  onChange,
+  onConfirm,
+  onClose,
+}: {
+  options: {
+    profile: IndividualProfile
+    newName: string
+    filamentIndex: number
+    printerIndex: number
+    singleOnly: boolean
+  }
+  profiles: IndividualProfile[]
+  extracting: boolean
+  onChange: (opts: typeof options) => void
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const filaments = profiles.filter(p => p.type === 'filament')
+  const printers = profiles.filter(p => p.type === 'printer')
+  const isPrint = options.profile.type === 'print'
+  const isFilament = options.profile.type === 'filament'
+  const isPrinter = options.profile.type === 'printer'
+
+  return (
+    <div className="fixed inset-0 z-[10002] flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div
+        className="dark flex w-full max-w-md flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-blue-600/20 p-2">
+              <FileOutput className="h-5 w-5 text-blue-400" />
+            </div>
+            <div>
+              <h2 className="font-mono text-lg font-semibold text-blue-400">Extract Profile</h2>
+              <p className="text-xs text-slate-500">{options.profile.name} · {options.profile.type}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* New name */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-400">New profile name</label>
+            <input
+              type="text"
+              value={options.newName}
+              onChange={(e) => onChange({ ...options, newName: e.target.value })}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Export mode */}
+          <div>
+            <label className="mb-2 block text-xs font-medium text-slate-400">Export mode</label>
+            <div className="space-y-2">
+              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                !options.singleOnly ? 'border-blue-600 bg-blue-600/10' : 'border-slate-700 bg-slate-900 hover:bg-slate-800'
+              }`}>
+                <input
+                  type="radio"
+                  checked={!options.singleOnly}
+                  onChange={() => onChange({ ...options, singleOnly: false })}
+                  className="mt-0.5"
+                />
+                <div>
+                  <div className="text-sm font-medium text-slate-200">Complete config bundle</div>
+                  <div className="text-xs text-slate-500">
+                    Includes header, print + filament + printer + presets. Required for eufyMake import.
+                  </div>
+                </div>
+              </label>
+              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                options.singleOnly ? 'border-blue-600 bg-blue-600/10' : 'border-slate-700 bg-slate-900 hover:bg-slate-800'
+              }`}>
+                <input
+                  type="radio"
+                  checked={options.singleOnly}
+                  onChange={() => onChange({ ...options, singleOnly: true })}
+                  className="mt-0.5"
+                />
+                <div>
+                  <div className="text-sm font-medium text-slate-200">Single section only</div>
+                  <div className="text-xs text-slate-500">
+                    Just the [{options.profile.type}:{options.profile.name}] section. For PrusaSlicer/OrcaSlicer import.
+                  </div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Filament/printer selection (only in bundle mode) */}
+          {!options.singleOnly && isPrint && filaments.length > 0 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-400">
+                Paired filament ({filaments.length} available)
+              </label>
+              <select
+                value={options.filamentIndex}
+                onChange={(e) => onChange({ ...options, filamentIndex: parseInt(e.target.value) })}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value={-1}>Auto (from original presets)</option>
+                {filaments.map(f => (
+                  <option key={f.index} value={f.index}>{f.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {!options.singleOnly && isPrint && printers.length > 0 && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-400">
+                Paired printer ({printers.length} available)
+              </label>
+              <select
+                value={options.printerIndex}
+                onChange={(e) => onChange({ ...options, printerIndex: parseInt(e.target.value) })}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value={-1}>Auto (from original presets)</option>
+                {printers.map(p => (
+                  <option key={p.index} value={p.index}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Info for non-print types */}
+          {!options.singleOnly && (isFilament || isPrinter) && (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs text-slate-400">
+              {isFilament ? 'Print and printer profiles will be auto-included from the original file.' : 'Print and filament profiles will be auto-included from the original file.'}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-800 px-6 py-4">
+          <button
+            onClick={onConfirm}
+            disabled={extracting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+          >
+            {extracting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileOutput className="h-4 w-4" />
+            )}
+            {options.singleOnly ? 'Extract Single Section' : 'Extract Config Bundle'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
