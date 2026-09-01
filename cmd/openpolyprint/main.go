@@ -2429,8 +2429,21 @@ func main() {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
+		// Build a response that includes content (the Content field has json:"-"
+		// to avoid sending it in list responses)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(pf)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":         pf.ID,
+			"name":       pf.Name,
+			"filename":   pf.Filename,
+			"category":   pf.Category,
+			"size":       pf.Size,
+			"tags":       pf.Tags,
+			"slicer":     pf.Slicer,
+			"notes":      pf.Notes,
+			"content":    pf.Content,
+			"uploadedAt": pf.UploadedAt,
+		})
 	})
 
 	mux.HandleFunc("/api/profile-files/tags", func(w http.ResponseWriter, r *http.Request) {

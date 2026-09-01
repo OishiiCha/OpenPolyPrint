@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom'
 import {
   ArrowLeft, Upload, Trash2, Edit3, Download, Eye, Tag as TagIcon,
   Loader2, FileText, X, Search, Repeat, AlertTriangle, CheckCircle2,
-  Sparkles,
+  Sparkles, ChevronDown, ChevronRight, Settings as SettingsIcon,
+  Printer as PrinterIcon, Layers, Box,
 } from 'lucide-react'
 import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 
@@ -34,24 +35,151 @@ function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-// Parse INI content into sections for display
+// Parse INI content into sections for display.
+// Handles both sectioned INI ([print:...]) and flat INI (eufyMake export).
 function parseINI(content: string): { section: string; keys: { key: string; value: string }[] }[] {
   const sections: { section: string; keys: { key: string; value: string }[] }[] = []
   let current: { section: string; keys: { key: string; value: string }[] } | null = null
+  const flatKeys: { key: string; value: string }[] = []
+  let hasSections = false
+
   for (const line of content.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith(';') || trimmed.startsWith('#')) continue
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      hasSections = true
       current = { section: trimmed.slice(1, -1), keys: [] }
       sections.push(current)
       continue
     }
     const idx = trimmed.indexOf('=')
-    if (idx > 0 && current) {
-      current.keys.push({ key: trimmed.slice(0, idx).trim(), value: trimmed.slice(idx + 1).trim() })
+    if (idx > 0) {
+      const key = trimmed.slice(0, idx).trim()
+      const value = trimmed.slice(idx + 1).trim()
+      if (current) {
+        current.keys.push({ key, value })
+      } else {
+        flatKeys.push({ key, value })
+      }
     }
   }
+
+  // If flat INI (no section headers), categorize settings into print/filament/printer
+  if (!hasSections && flatKeys.length > 0) {
+    const categorized = categorizeFlatINI(flatKeys)
+    for (const cat of categorized) {
+      if (cat.keys.length > 0) {
+        sections.push(cat)
+      }
+    }
+  }
+
   return sections
+}
+
+// Categorize flat INI settings into print/filament/printer groups.
+// Mirrors the Go backend categorizeSetting logic.
+function categorizeFlatINI(keys: { key: string; value: string }[]): { section: string; keys: { key: string; value: string }[] }[] {
+  const print: { key: string; value: string }[] = []
+  const filament: { key: string; value: string }[] = []
+  const printer: { key: string; value: string }[] = []
+  const meta: { key: string; value: string }[] = []
+
+  // Filament-related prefixes and exact keys
+  const filamentPrefixes = ['filament_', 'default_filament_profile']
+  const filamentExact = new Set([
+    'temperature', 'bed_temperature', 'first_layer_temperature', 'first_layer_bed_temperature',
+    'cooling', 'max_fan_speed', 'min_fan_speed', 'disable_fan_first_layers', 'fan_always_on',
+    'fan_below_layer_time', 'bridge_fan_speed', 'full_fan_speed_layer', 'enable_dynamic_fan_speeds',
+    'overhang_fan_speed_0', 'overhang_fan_speed_1', 'overhang_fan_speed_2', 'overhang_fan_speed_3',
+    'idle_temperature', 'standby_temperature_delta', 'high_current_on_filament_swap',
+    'autoemit_temperature_commands', 'end_filament_gcode', 'start_filament_gcode',
+    'extruder_colour', 'extruder_offset', 'max_volumetric_speed',
+    'max_volumetric_extrusion_rate_slope_negative', 'max_volumetric_extrusion_rate_slope_positive',
+    'single_extruder_multi_material', 'single_extruder_multi_material_priming',
+    'extrusion_multiplier',
+  ])
+
+  // Printer-related prefixes and exact keys
+  const printerPrefixes = ['machine_', 'printer_', 'bed_', 'nozzle_']
+  const printerExact = new Set([
+    'bed_shape', 'bed_custom_model', 'bed_custom_texture', 'max_print_height', 'nozzle_diameter',
+    'printer_model', 'printer_vendor', 'printer_technology', 'printer_variant', 'printer_settings_id',
+    'printer_notes', 'physical_printer_settings_id', 'gcode_flavor', 'gcode_resolution',
+    'gcode_substitutions', 'gcode_comments', 'gcode_label_objects',
+    'start_gcode', 'end_gcode', 'before_layer_gcode', 'layer_gcode', 'toolchange_gcode',
+    'between_objects_gcode', 'color_change_gcode', 'pause_print_gcode', 'template_custom_gcode',
+    'extruder_clearance_height', 'extruder_clearance_radius', 'extrusion_axis', 'extruder_count',
+    'use_firmware_retraction', 'use_relative_e_distances', 'use_volumetric_e', 'variable_layer_height',
+    'silent_mode', 'remaining_times', 'host_type', 'print_host', 'printhost_apikey', 'printhost_cafile',
+    'thumbnails', 'thumbnails_format', 'output_filename_format', 'default_print_profile',
+    'threads', 'z_offset', 'xy_hole_compensation', 'xy_size_compensation', 'hole_offset',
+    'elefant_foot_compensation', 'lift_type', 'travel_speed_z', 'machine_limits_usage',
+    'slice_closing_radius', 'slicing_mode', 'mmu_segmented_region_max_width', 'parking_pos_retraction',
+    'wiping_volumes_extruders', 'wiping_volumes_matrix',
+    'compatible_printers_condition_cummulative', 'compatible_prints_condition_cummulative',
+    'inherits_cummulative', 'notes', 'colorprint_heights', 'post_process', 'enable_arc_fitting',
+    'make_overhang_printable', 'make_overhang_printable_angle', 'make_overhang_printable_hole_size',
+    'slow_down_layers',
+  ])
+
+  // Meta keys (not actual settings, just identifiers)
+  const metaExact = new Set([
+    'print_settings_id', 'filament_settings_id', 'inherits', 'from', 'version',
+    'compatible_printers', 'compatible_prints', 'compatible_printers_condition',
+    'compatible_prints_condition', 'renamed_from', 'parent',
+  ])
+
+  for (const { key, value } of keys) {
+    // Check meta first
+    if (metaExact.has(key)) {
+      meta.push({ key, value })
+      continue
+    }
+
+    // Check filament
+    let isFilament = filamentExact.has(key)
+    if (!isFilament) {
+      for (const prefix of filamentPrefixes) {
+        if (key.startsWith(prefix)) { isFilament = true; break }
+      }
+    }
+    if (isFilament) {
+      filament.push({ key, value })
+      continue
+    }
+
+    // Check printer
+    let isPrinter = printerExact.has(key)
+    if (!isPrinter) {
+      for (const prefix of printerPrefixes) {
+        if (key.startsWith(prefix)) { isPrinter = true; break }
+      }
+    }
+    if (isPrinter) {
+      printer.push({ key, value })
+      continue
+    }
+
+    // Default: print settings
+    print.push({ key, value })
+  }
+
+  // Sort each category alphabetically by key
+  const sortKeys = (arr: { key: string; value: string }[]) =>
+    arr.sort((a, b) => a.key.localeCompare(b.key))
+
+  sortKeys(print)
+  sortKeys(filament)
+  sortKeys(printer)
+  sortKeys(meta)
+
+  return [
+    { section: 'meta', keys: meta },
+    { section: 'print', keys: print },
+    { section: 'filament', keys: filament },
+    { section: 'printer', keys: printer },
+  ]
 }
 
 export function ProfileFiles() {
@@ -455,68 +583,229 @@ function UploadModal({ category, onClose, onUploaded }: { category: Category; on
 
 function ViewModal({ file, onClose }: { file: ProfileFile; onClose: () => void }) {
   const sections = file.content ? parseINI(file.content) : []
+  const [search, setSearch] = useState('')
+  const [activeCategory, setActiveCategory] = useState<string>('all')
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  const [showRaw, setShowRaw] = useState(false)
+
+  // Detect format
+  const isJSON = file.content?.trim().startsWith('{')
+  const totalSettings = sections.reduce((sum, s) => sum + s.keys.length, 0)
+
+  // Get category stats
+  const categoryStats = sections.map(s => ({ section: s.section, count: s.keys.length }))
+
+  // Filter settings based on search and active category
+  const filteredSections = sections
+    .filter(s => activeCategory === 'all' || s.section === activeCategory)
+    .map(s => ({
+      ...s,
+      keys: search
+        ? s.keys.filter(kv =>
+            kv.key.toLowerCase().includes(search.toLowerCase()) ||
+            kv.value.toLowerCase().includes(search.toLowerCase())
+          )
+        : s.keys,
+    }))
+    .filter(s => s.keys.length > 0)
+
+  const toggleSection = (section: string) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(section)) next.delete(section)
+      else next.add(section)
+      return next
+    })
+  }
+
+  // Category icon + color
+  const categoryStyle = (section: string): { icon: typeof Layers; color: string; bg: string } => {
+    switch (section) {
+      case 'print':
+        return { icon: Layers, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/30' }
+      case 'filament':
+        return { icon: Box, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/30' }
+      case 'printer':
+        return { icon: PrinterIcon, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30' }
+      case 'meta':
+        return { icon: SettingsIcon, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/30' }
+      default:
+        return { icon: FileText, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/30' }
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
       <div
-        className="dark flex w-full max-w-2xl max-h-[90vh] flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
+        className="dark flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-lg border-2 border-slate-700 bg-slate-950 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="truncate font-mono text-lg font-semibold text-blue-400">{file.name}</h2>
-            <p className="truncate text-xs text-slate-500">{file.filename} - {formatSize(file.size)}</p>
+            <p className="truncate text-xs text-slate-500">
+              {file.filename} · {formatSize(file.size)}
+              {totalSettings > 0 && ` · ${totalSettings} settings`}
+            </p>
           </div>
           <button onClick={onClose} className="shrink-0 rounded p-1 text-slate-400 hover:text-white">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Metadata */}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {file.slicer && (
-              <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                {file.slicer}
-              </span>
-            )}
-            {file.tags && file.tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                {tag}
-              </span>
-            ))}
-          </div>
-
+        {/* Tags + metadata bar */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/50 px-6 py-3">
+          {file.slicer && (
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+              {file.slicer}
+            </span>
+          )}
+          {file.tags && file.tags.map((tag) => (
+            <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              {tag}
+            </span>
+          ))}
           {file.notes && (
-            <p className="mb-4 rounded-lg bg-slate-900 p-3 text-sm text-slate-300">{file.notes}</p>
+            <span className="truncate text-xs text-slate-500" title={file.notes}>
+              {file.notes}
+            </span>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Search + view toggle */}
+          {!isJSON && sections.length > 0 && (
+            <>
+              <div className="mb-4 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search settings..."
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowRaw(!showRaw)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    showRaw
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                  }`}
+                >
+                  {showRaw ? 'Parsed' : 'Raw'}
+                </button>
+              </div>
+
+              {/* Category tabs */}
+              {!showRaw && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setActiveCategory('all')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                      activeCategory === 'all'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    All ({totalSettings})
+                  </button>
+                  {categoryStats.map(cs => (
+                    <button
+                      key={cs.section}
+                      onClick={() => setActiveCategory(cs.section)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeCategory === cs.section
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                      }`}
+                    >
+                      {cs.section} ({cs.count})
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
-          {/* Parsed INI sections */}
-          {sections.length > 0 ? (
-            <div className="space-y-3">
-              <h3 className="font-mono text-sm font-semibold text-slate-300">Parsed settings</h3>
-              {sections.map((sec) => (
-                <div key={sec.section} className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-                  <h4 className="mb-2 font-mono text-xs font-semibold text-blue-400">[{sec.section}]</h4>
-                  <div className="grid gap-1 sm:grid-cols-2">
-                    {sec.keys.map((kv, i) => (
-                      <div key={i} className="flex items-center gap-2 font-mono text-xs">
-                        <span className="text-slate-400">{kv.key}</span>
-                        <span className="text-slate-600">=</span>
-                        <span className="truncate text-slate-200">{kv.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : file.content ? (
+          {/* Content display */}
+          {isJSON ? (
+            // JSON file display
             <div>
-              <h3 className="mb-2 font-mono text-sm font-semibold text-slate-300">Raw content</h3>
-              <pre className="max-h-96 overflow-auto rounded-lg bg-slate-900 p-3 font-mono text-xs text-slate-300">
+              <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
                 {file.content}
               </pre>
             </div>
+          ) : showRaw ? (
+            // Raw INI display
+            <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
+              {file.content}
+            </pre>
+          ) : sections.length > 0 ? (
+            // Parsed INI display with collapsible sections
+            <div className="space-y-3">
+              {filteredSections.map((sec) => {
+                const style = categoryStyle(sec.section)
+                const Icon = style.icon
+                const isCollapsed = collapsedSections.has(sec.section)
+                return (
+                  <div key={sec.section} className={`rounded-lg border ${style.bg} overflow-hidden`}>
+                    <button
+                      onClick={() => toggleSection(sec.section)}
+                      className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isCollapsed ? (
+                          <ChevronRight className="h-4 w-4 text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-slate-500" />
+                        )}
+                        <Icon className={`h-4 w-4 ${style.color}`} />
+                        <span className={`font-mono text-sm font-semibold ${style.color}`}>
+                          {sec.section}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          ({sec.keys.length})
+                        </span>
+                      </div>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="border-t border-slate-800/50 p-3">
+                        <div className="grid gap-1 sm:grid-cols-2">
+                          {sec.keys.map((kv, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-slate-800/50"
+                            >
+                              <span className="shrink-0 text-slate-400">{kv.key}</span>
+                              <span className="text-slate-600">=</span>
+                              <span
+                                className="truncate text-slate-200"
+                                title={kv.value}
+                              >
+                                {kv.value || '(empty)'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {filteredSections.length === 0 && search && (
+                <div className="py-8 text-center text-sm text-slate-500">
+                  No settings match "{search}"
+                </div>
+              )}
+            </div>
+          ) : file.content ? (
+            <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
+              {file.content}
+            </pre>
           ) : (
             <p className="text-sm text-slate-500">No content available</p>
           )}
