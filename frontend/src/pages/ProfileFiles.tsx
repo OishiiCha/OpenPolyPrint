@@ -192,11 +192,13 @@ function categorizeFlatINI(keys: { key: string; value: string }[]): { section: s
   ]
 }
 
+type FileOrigin = 'uploaded' | 'ai-fixed' | 'converted'
+
 export function ProfileFiles() {
   const [files, setFiles] = useState<ProfileFile[]>([])
   const [allTags, setAllTags] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<Category>('filament')
+  const [activeTab, setActiveTab] = useState<FileOrigin>('uploaded')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [viewing, setViewing] = useState<ProfileFile | null>(null)
   const [editing, setEditing] = useState<ProfileFile | null>(null)
@@ -206,16 +208,33 @@ export function ProfileFiles() {
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
+  // Determine file origin from notes field
+  const getOrigin = (f: ProfileFile): FileOrigin => {
+    const notes = (f.notes || '').toLowerCase()
+    if (notes.includes('ai-optimized') || notes.includes('ai optimized') || notes.includes('edited from')) {
+      return 'ai-fixed'
+    }
+    if (notes.includes('converted from') || notes.includes('converted by') || notes.includes('converted')) {
+      return 'converted'
+    }
+    return 'uploaded'
+  }
+
   const fetchAll = useCallback(() => {
+    // Fetch all files (both categories) and filter client-side by origin
     Promise.all([
-      fetch(`/api/profile-files?category=${activeTab}`).then((r) => r.json()),
-      fetch(`/api/profile-files/tags?category=${activeTab}`).then((r) => r.json()),
-    ]).then(([f, t]) => {
-      if (Array.isArray(f)) setFiles(f)
-      if (Array.isArray(t)) setAllTags(t)
+      fetch(`/api/profile-files?category=filament`).then((r) => r.json()),
+      fetch(`/api/profile-files?category=print`).then((r) => r.json()),
+    ]).then(([fil, pri]) => {
+      const all = [...(Array.isArray(fil) ? fil : []), ...(Array.isArray(pri) ? pri : [])]
+      setFiles(all)
+      // Collect tags from all files
+      const tagSet = new Set<string>()
+      all.forEach((f: ProfileFile) => (f.tags || []).forEach(t => tagSet.add(t)))
+      setAllTags(Array.from(tagSet))
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [activeTab])
+  }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -261,11 +280,20 @@ export function ProfileFiles() {
   }
 
   const filtered = files.filter((f) => {
+    // Filter by origin tab
+    if (getOrigin(f) !== activeTab) return false
     const tags = f.tags || []
     if (tagFilter && !tags.includes(tagFilter)) return false
     if (search && !f.name.toLowerCase().includes(search.toLowerCase()) && !tags.some((t) => t.toLowerCase().includes(search.toLowerCase()))) return false
     return true
   })
+
+  // Count files per origin for tab badges
+  const originCounts = {
+    uploaded: files.filter(f => getOrigin(f) === 'uploaded').length,
+    'ai-fixed': files.filter(f => getOrigin(f) === 'ai-fixed').length,
+    converted: files.filter(f => getOrigin(f) === 'converted').length,
+  }
 
   if (loading) {
     return (
@@ -302,17 +330,27 @@ export function ProfileFiles() {
 
       {/* Tabs */}
       <div className="flex gap-2">
-        {(['filament', 'print'] as Category[]).map((cat) => (
+        {([
+          { key: 'uploaded' as FileOrigin, label: 'Uploaded', icon: Upload },
+          { key: 'ai-fixed' as FileOrigin, label: 'AI Fixed', icon: Sparkles },
+          { key: 'converted' as FileOrigin, label: 'Converted', icon: Repeat },
+        ]).map(({ key, label, icon: Icon }) => (
           <button
-            key={cat}
-            onClick={() => { setActiveTab(cat); setTagFilter(null); setSearch('') }}
-            className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors ${
-              activeTab === cat
+            key={key}
+            onClick={() => { setActiveTab(key); setTagFilter(null); setSearch('') }}
+            className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === key
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
             }`}
           >
-            {cat} Profiles
+            <Icon className="h-4 w-4" />
+            {label}
+            <span className={`rounded-full px-1.5 py-0.5 text-xs ${
+              activeTab === key ? 'bg-white/20' : 'bg-slate-200 dark:bg-slate-700'
+            }`}>
+              {originCounts[key]}
+            </span>
           </button>
         ))}
       </div>
@@ -353,7 +391,7 @@ export function ProfileFiles() {
         <div className="rounded-xl border border-dashed border-slate-300 p-12 text-center dark:border-slate-700">
           <FileText className="mx-auto mb-3 h-12 w-12 text-slate-300 dark:text-slate-600" />
           <p className="font-mono text-sm text-slate-400">
-            No {activeTab} profile files yet. Upload slicer profiles to share them across software and computers.
+            No {activeTab === 'ai-fixed' ? 'AI-fixed' : activeTab} profile files yet. {activeTab === 'uploaded' ? 'Upload slicer profiles to share them across software and computers.' : activeTab === 'ai-fixed' ? 'Use the AI Edit feature on a profile to create AI-optimized versions.' : 'Convert profiles to other slicer formats to see them here.'}
           </p>
         </div>
       ) : (
@@ -390,11 +428,20 @@ export function ProfileFiles() {
                 </div>
               </div>
 
-              {f.slicer && (
-                <span className="mt-2 inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                  {f.slicer}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${
+                  f.category === 'filament'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                }`}>
+                  {f.category}
                 </span>
-              )}
+                {f.slicer && (
+                  <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                    {f.slicer}
+                  </span>
+                )}
+              </div>
 
               {f.tags && f.tags.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
@@ -422,7 +469,7 @@ export function ProfileFiles() {
       {/* Upload modal */}
       {uploadOpen && (
         <UploadModal
-          category={activeTab}
+          category="filament"
           onClose={() => setUploadOpen(false)}
           onUploaded={() => { setUploadOpen(false); fetchAll() }}
         />
@@ -446,7 +493,7 @@ export function ProfileFiles() {
       {convertOpen && (
         <ConvertModal
           file={converting}
-          category={activeTab}
+          category="filament"
           onClose={() => { setConvertOpen(false); setConverting(null) }}
           onConverted={() => { setConvertOpen(false); setConverting(null); fetchAll() }}
         />
