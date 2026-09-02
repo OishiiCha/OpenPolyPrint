@@ -3791,10 +3791,11 @@ func main() {
 	})
 
 	// ── Planning Documents API ────────────────────────────────────────
-	planningDir := filepath.Join(settingsDir, "..", "planning")
-	// Fallback: use the planning directory next to the executable
+	// Prefer the planning directory in the project root (relative to cwd),
+	// then fall back to a directory next to the settings/config dir.
+	planningDir := "planning"
 	if _, err := os.Stat(planningDir); err != nil {
-		planningDir = "planning"
+		planningDir = filepath.Join(settingsDir, "planning")
 	}
 	_ = os.MkdirAll(planningDir, 0o755)
 
@@ -3842,26 +3843,6 @@ func main() {
 				})
 			}
 			_ = json.NewEncoder(w).Encode(files)
-		case http.MethodPost:
-			var req struct {
-				Name    string `json:"name"`
-				Content string `json:"content"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-				return
-			}
-			// Sanitize filename — only allow alphanumeric, dash, underscore
-			name := sanitizeFilename(req.Name)
-			if !strings.HasSuffix(name, ".md") {
-				name += ".md"
-			}
-			path := filepath.Join(planningDir, name)
-			if err := os.WriteFile(path, []byte(req.Content), 0o644); err != nil {
-				http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"name": name})
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}

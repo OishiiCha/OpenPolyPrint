@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowLeft, Plus, Trash2, Edit3, FileText, Loader2, Save, X, Search,
+  ArrowLeft, Trash2, Edit3, FileText, Loader2, Save, X, Search,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -21,9 +21,6 @@ export function Planning() {
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
-  const [showNewForm, setShowNewForm] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newContent, setNewContent] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -96,32 +93,6 @@ export function Planning() {
     fetchFiles()
   }
 
-  const createFile = async () => {
-    if (!newName.trim()) return
-    setSaving(true)
-    setError(null)
-    try {
-      const initialContent = `# ${newName.trim()}\n\n## Overview\n\nDescribe the plan here...\n\n## Tasks\n\n- [ ] Task 1\n- [ ] Task 2\n- [ ] Task 3\n\n## Notes\n\n`
-      const res = await fetch('/api/planning', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim(), content: newContent || initialContent }),
-      })
-      if (!res.ok) throw new Error('Failed to create')
-      const data = await res.json()
-      setShowNewForm(false)
-      setNewName('')
-      setNewContent('')
-      fetchFiles()
-      // Load the new file
-      loadFile({ name: data.name, size: 0, modified: Date.now() / 1000, title: newName.trim() })
-    } catch {
-      setError('Failed to create file')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const filtered = files.filter(f =>
     f.title.toLowerCase().includes(search.toLowerCase()) ||
     f.name.toLowerCase().includes(search.toLowerCase())
@@ -146,14 +117,6 @@ export function Planning() {
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
           {files.length} docs
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setShowNewForm(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
-          >
-            <Plus className="h-4 w-4" /> New Doc
-          </button>
-        </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -216,11 +179,11 @@ export function Planning() {
             </div>
           )}
 
-          {!selected && !showNewForm && (
+          {!selected && (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <FileText className="mx-auto h-12 w-12 text-slate-300 dark:text-slate-700" />
-                <p className="mt-3 text-sm text-slate-400">Select a document or create a new one</p>
+                <p className="mt-3 text-sm text-slate-400">Select a document to view</p>
               </div>
             </div>
           )}
@@ -315,46 +278,6 @@ export function Planning() {
         </div>
       </div>
 
-      {/* New doc modal */}
-      {showNewForm && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={() => setShowNewForm(false)}>
-          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-950 p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="mb-4 font-semibold text-white">New Planning Document</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Document title</label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Bambu Lab LAN Protocol"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  onKeyDown={(e) => e.key === 'Enter' && createFile()}
-                  autoFocus
-                />
-                <p className="mt-1 text-[10px] text-slate-500">
-                  Will be saved as {newName.trim() ? newName.trim().toLowerCase().replace(/\s+/g, '-') : 'filename'}.md
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowNewForm(false)}
-                className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={createFile}
-                disabled={!newName.trim() || saving}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
-              >
-                {saving ? 'Creating...' : 'Create'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
