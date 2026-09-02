@@ -21,7 +21,7 @@ import {
   Plug as PlugIcon,
   Sparkles,
   BarChart3,
-  Gauge,
+  Wrench,
   Menu,
   X,
   ChevronDown,
@@ -58,7 +58,7 @@ const navItems: NavEntry[] = [
       { to: '/printers', label: 'Printers', icon: Printer },
       { to: '/queue', label: 'Print Queue', icon: ListOrdered },
       { to: '/filament', label: 'Filament', icon: Package },
-      { to: '/profiles', label: 'Profiles', icon: Gauge },
+      { to: '/maintenance', label: 'Maintenance', icon: Wrench },
     ],
   },
   {

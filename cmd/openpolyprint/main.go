@@ -540,6 +540,7 @@ func main() {
 		log.Printf("stl files store: %v", err)
 	}
 	maintStore := maintenance.NewStore(settingsDir)
+	partStore := maintenance.NewPartStore(settingsDir)
 	plugMgr := smartplug.NewManager()
 	pushMgr := push.NewManager(settingsDir)
 
@@ -3717,6 +3718,74 @@ func main() {
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
+	})
+
+	// ── Parts Inventory API ───────────────────────────────────────────
+	mux.HandleFunc("/api/parts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(partStore.List())
+		case http.MethodPost:
+			var p maintenance.Part
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(partStore.Add(p))
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/parts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPut:
+			var p maintenance.Part
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !partStore.Update(id, p) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(p)
+		case http.MethodDelete:
+			if !partStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodPost:
+			// Adjust stock: body { "delta": -1 }
+			var body struct {
+				Delta int `json:"delta"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if !partStore.AdjustStock(id, body.Delta) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/parts/low-stock", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(partStore.LowStock())
+	})
+
+	mux.HandleFunc("/api/parts/value", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]float64{"totalValue": partStore.TotalValue()})
 	})
 
 	mux.HandleFunc("/api/temps", func(w http.ResponseWriter, r *http.Request) {

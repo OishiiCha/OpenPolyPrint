@@ -4471,7 +4471,7 @@ export function Settings() {
               { to: '/gcode', label: 'G-code' },
               { to: '/queue', label: 'Print Queue' },
               { to: '/filament', label: 'Filament' },
-              { to: '/profiles', label: 'Profiles' },
+              { to: '/maintenance', label: 'Maintenance' },
               { to: '/profile-files', label: 'Profile Files' },
               { to: '/stl-files', label: 'STL Library' },
               { to: '/plugs', label: 'Smart Plugs' },

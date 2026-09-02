@@ -22,7 +22,7 @@ import { Filament } from './pages/Filament'
 import { SmartPlugs } from './pages/SmartPlugs'
 import { PrintAnalysis } from './pages/PrintAnalysis'
 import { Analytics } from './pages/Analytics'
-import { Profiles } from './pages/Profiles'
+import { Maintenance } from './pages/Maintenance'
 import { ProfileFiles } from './pages/ProfileFiles'
 import { STLFiles } from './pages/STLFiles'
 import { Login } from './pages/Login'
@@ -88,7 +88,7 @@ function App() {
             <Route path="gcode/:id" element={<GCodeDetail />} />
             <Route path="queue" element={<PrintQueue />} />
             <Route path="filament" element={<Filament />} />
-            <Route path="profiles" element={<Profiles />} />
+            <Route path="maintenance" element={<Maintenance />} />
             <Route path="profile-files" element={<ProfileFiles />} />
             <Route path="stl-files" element={<STLFiles />} />
             <Route path="plugs" element={<SmartPlugs />} />
