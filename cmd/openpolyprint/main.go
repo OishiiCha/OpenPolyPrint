@@ -4267,6 +4267,65 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
+	mux.HandleFunc("/api/printers/{id}/set-temp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Heater string  `json:"heater"` // "nozzle" or "bed"
+			Temp   float64 `json:"temp"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch req.Heater {
+		case "nozzle":
+			err = mgr.Load().SetNozzleTemp(r.Context(), id, req.Temp)
+		case "bed":
+			err = mgr.Load().SetBedTemp(r.Context(), id, req.Temp)
+		default:
+			http.Error(w, `{"error":"heater must be 'nozzle' or 'bed'"}`, http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
+	mux.HandleFunc("/api/printers/{id}/extrude", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Amount   float64 `json:"amount"`   // mm (positive = extrude, negative = retract)
+			Feedrate float64 `json:"feedrate"` // mm/min
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Feedrate == 0 {
+			req.Feedrate = 300 // default extrude feedrate
+		}
+		if err := mgr.Load().Extrude(r.Context(), id, req.Amount, req.Feedrate); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
 	// ---- Print session endpoints (AI data collection) ----
 	mux.HandleFunc("/api/printers/{id}/session", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

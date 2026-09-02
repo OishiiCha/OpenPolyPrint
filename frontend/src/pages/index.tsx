@@ -13,6 +13,7 @@ import { AIAnalyzeModal } from '../components/AIAnalyzeModal'
 import { usePushNotifications } from '../hooks/usePushNotifications'
 import {
   Camera as CameraIcon,
+  ChevronDown,
   Circle,
   CircleDot,
   Download,
@@ -30,6 +31,7 @@ import {
   Play,
   Plus,
   Printer as PrinterIcon,
+  RotateCcw,
   Gauge,
   Search,
   Settings as SettingsIcon,
@@ -1152,6 +1154,11 @@ function JogControls({ jog, home }: { jog: (axis: string, dist: number, feed: nu
 }
 
 function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[] }) {
+  const [nozzleInput, setNozzleInput] = useState('')
+  const [bedInput, setBedInput] = useState('')
+  const [extrudeAmount, setExtrudeAmount] = useState(10)
+  const [extrudeFeed, setExtrudeFeed] = useState(300)
+
   const post = async (path: string, body?: object) => {
     try {
       const res = await fetch(`/api/printers/${printer.id}${path}`, {
@@ -1173,14 +1180,30 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
     post('/move', { axis, distance, speed: feed })
   }
 
+  const setTemp = (heater: string, temp: number) => {
+    post('/set-temp', { heater, temp })
+    window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+      detail: { type: 'success', message: `${heater} set to ${temp}°C` }
+    }))
+  }
+
+  const extrude = (amount: number) => {
+    post('/extrude', { amount, feedrate: extrudeFeed })
+    window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+      detail: { type: 'success', message: amount > 0 ? `Extruding ${amount}mm` : `Retracting ${Math.abs(amount)}mm` }
+    }))
+  }
+
   const liveCamera = cameras.find((c) => c.enabled && c.url)
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-3">
+        {/* Temperatures with individual set controls */}
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ temperatures ]</h3>
           <div className="space-y-4">
+            {/* Nozzle */}
             <div>
               <div className="mb-1 flex justify-between text-sm">
                 <span className="text-slate-600 dark:text-slate-300">Nozzle</span>
@@ -1196,7 +1219,25 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
                   }}
                 />
               </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  value={nozzleInput}
+                  onChange={(e) => setNozzleInput(e.target.value)}
+                  placeholder={String(printer.temps.targetNozzle || 0)}
+                  className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+                <span className="text-sm text-slate-400">°C</span>
+                <button
+                  onClick={() => setTemp('nozzle', Number(nozzleInput) || 0)}
+                  disabled={!nozzleInput}
+                  className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-200 disabled:opacity-50 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50"
+                >
+                  Set Nozzle
+                </button>
+              </div>
             </div>
+            {/* Bed */}
             <div>
               <div className="mb-1 flex justify-between text-sm">
                 <span className="text-slate-600 dark:text-slate-300">Bed</span>
@@ -1212,10 +1253,28 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
                   }}
                 />
               </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  value={bedInput}
+                  onChange={(e) => setBedInput(e.target.value)}
+                  placeholder={String(printer.temps.targetBed || 0)}
+                  className="w-20 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+                <span className="text-sm text-slate-400">°C</span>
+                <button
+                  onClick={() => setTemp('bed', Number(bedInput) || 0)}
+                  disabled={!bedInput}
+                  className="rounded-lg bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-200 disabled:opacity-50 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                >
+                  Set Bed
+                </button>
+              </div>
             </div>
           </div>
         </Card>
 
+        {/* Macros */}
         <Card>
           <h3 className="mb-4 font-mono font-semibold text-blue-400">[ macros ]</h3>
           <div className="grid grid-cols-3 gap-3">
@@ -1255,9 +1314,57 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
         )}
       </div>
 
+      {/* Jog controls */}
       <Card>
         <h3 className="mb-4 font-mono font-semibold text-blue-400">[ jog_controls ]</h3>
         <JogControls jog={jog} home={() => post('/home')} />
+      </Card>
+
+      {/* Extrude / Retract */}
+      <Card>
+        <h3 className="mb-4 font-mono font-semibold text-blue-400">[ extrude_/_retract ]</h3>
+        <div className="flex flex-wrap items-center gap-6">
+          {/* Amount selector */}
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-xs text-slate-400">amount (mm)</span>
+            <div className="flex flex-wrap gap-1">
+              {[1, 5, 10, 25, 50, 100].map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setExtrudeAmount(a)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${extrudeAmount === a ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'}`}
+                >
+                  {a}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Feedrate */}
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-xs text-slate-400">feedrate (mm/min)</span>
+            <input
+              type="number"
+              value={extrudeFeed}
+              onChange={(e) => setExtrudeFeed(Number(e.target.value) || 300)}
+              className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+          </div>
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={() => extrude(-extrudeAmount)}
+              className="flex items-center gap-2 rounded-lg bg-amber-100 px-5 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50"
+            >
+              <RotateCcw className="h-4 w-4" /> Retract {extrudeAmount}mm
+            </button>
+            <button
+              onClick={() => extrude(extrudeAmount)}
+              className="flex items-center gap-2 rounded-lg bg-emerald-100 px-5 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
+            >
+              <ChevronDown className="h-4 w-4" /> Extrude {extrudeAmount}mm
+            </button>
+          </div>
+        </div>
       </Card>
     </div>
   )
@@ -4219,6 +4326,33 @@ export function Terminal() {
   const [mini, setMini] = useState(() => loadConfig().showMiniTerminal)
   const [search, setSearch] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const { printers } = usePrinters()
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string>('')
+  const [jogStep, setJogStep] = useState(10)
+
+  const selectedPrinter = printers.find((p) => p.id === selectedPrinterId)
+
+  const sendPrinterCmd = async (path: string, body?: object) => {
+    if (!selectedPrinterId) return
+    try {
+      const res = await fetch(`/api/printers/${selectedPrinterId}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      if (!res.ok) throw new Error(await res.text())
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Command failed'
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
+    }
+  }
+
+  const jog = (axis: string, distance: number) => {
+    const feed = axis === 'Z' ? 600 : 3000
+    sendPrinterCmd('/move', { axis, distance, speed: feed })
+  }
 
   useEffect(() => {
     if (paused) return
@@ -4342,6 +4476,84 @@ export function Terminal() {
           />
         </div>
       </Card>
+
+      {/* Printer jog controls */}
+      {printers.length > 0 && (
+        <Card className="py-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-slate-400">printer:</span>
+              <select
+                value={selectedPrinterId}
+                onChange={(e) => setSelectedPrinterId(e.target.value)}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">— select —</option>
+                {printers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            {selectedPrinter && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-slate-400">step:</span>
+                  <div className="flex gap-1">
+                    {[1, 5, 10, 25, 50].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setJogStep(s)}
+                        className={`rounded px-2 py-0.5 text-xs font-medium ${jogStep === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* XY d-pad */}
+                <div className="grid grid-cols-3 gap-0.5">
+                  <div />
+                  <button onClick={() => jog('Y', jogStep)} disabled={!selectedPrinter} className="flex h-8 w-8 items-center justify-center rounded bg-slate-800 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`Y+${jogStep}`}>▲</button>
+                  <div />
+                  <button onClick={() => jog('X', -jogStep)} disabled={!selectedPrinter} className="flex h-8 w-8 items-center justify-center rounded bg-slate-800 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`X-${jogStep}`}>◀</button>
+                  <button onClick={() => sendPrinterCmd('/home')} disabled={!selectedPrinter} className="flex h-8 w-8 items-center justify-center rounded bg-slate-700 text-xs text-slate-300 hover:bg-slate-600 disabled:opacity-30" title="Home">⌂</button>
+                  <button onClick={() => jog('X', jogStep)} disabled={!selectedPrinter} className="flex h-8 w-8 items-center justify-center rounded bg-slate-800 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`X+${jogStep}`}>▶</button>
+                  <div />
+                  <button onClick={() => jog('Y', -jogStep)} disabled={!selectedPrinter} className="flex h-8 w-8 items-center justify-center rounded bg-slate-800 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`Y-${jogStep}`}>▼</button>
+                  <div />
+                </div>
+                {/* Z controls */}
+                <div className="flex flex-col gap-0.5">
+                  <button onClick={() => jog('Z', jogStep >= 10 ? Math.round(jogStep / 2) : 1)} disabled={!selectedPrinter} className="flex h-8 w-16 items-center justify-center rounded bg-slate-800 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`Z+${jogStep >= 10 ? Math.round(jogStep / 2) : 1}`}>▲ Z+</button>
+                  <button onClick={() => jog('Z', -(jogStep >= 10 ? Math.round(jogStep / 2) : 1))} disabled={!selectedPrinter} className="flex h-8 w-16 items-center justify-center rounded bg-slate-800 text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-30" title={`Z-${jogStep >= 10 ? Math.round(jogStep / 2) : 1}`}>▼ Z-</button>
+                </div>
+                {/* Quick actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => sendPrinterCmd('/preheat', { nozzle: 200, bed: 60 })}
+                    disabled={!selectedPrinter}
+                    className="rounded-lg bg-slate-800 px-3 py-1 font-mono text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-30"
+                  >
+                    Preheat
+                  </button>
+                  <button
+                    onClick={() => sendPrinterCmd('/cooldown')}
+                    disabled={!selectedPrinter}
+                    className="rounded-lg bg-slate-800 px-3 py-1 font-mono text-xs text-slate-300 hover:bg-slate-700 disabled:opacity-30"
+                  >
+                    Cooldown
+                  </button>
+                </div>
+                {/* Status indicator */}
+                <span className="ml-auto font-mono text-xs text-slate-500">
+                  {selectedPrinter.status} · {selectedPrinter.temps.nozzle}°/{selectedPrinter.temps.targetNozzle}°
+                </span>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
+
       <div className="flex-1 overflow-hidden rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-4 font-mono text-xs text-slate-300">
         <div className="h-full overflow-y-auto">
           {filteredLines.length === 0 ? (

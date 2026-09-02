@@ -90,6 +90,21 @@ func (d *StaticDriver) MoveAxis(ctx context.Context, axis string, distance float
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)
 }
 
+// SetNozzleTemp returns an error for the static driver.
+func (d *StaticDriver) SetNozzleTemp(ctx context.Context, temp float64) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
+
+// SetBedTemp returns an error for the static driver.
+func (d *StaticDriver) SetBedTemp(ctx context.Context, temp float64) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
+
+// Extrude returns an error for the static driver.
+func (d *StaticDriver) Extrude(ctx context.Context, amount float64, feedrate float64) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
+
 // UploadGCode returns an error for the static driver.
 func (d *StaticDriver) UploadGCode(ctx context.Context, filename string, data []byte) error {
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)

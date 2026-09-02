@@ -263,6 +263,21 @@ func (d *Driver) MoveAxis(ctx context.Context, axis string, distance float64, sp
 	return d.postGCode(ctx, fmt.Sprintf("G91\nG0 %s%.2f F%.0f\nG90", axis, distance, speed))
 }
 
+// SetNozzleTemp sets the nozzle target temperature.
+func (d *Driver) SetNozzleTemp(ctx context.Context, temp float64) error {
+	return d.postGCode(ctx, fmt.Sprintf("M104 S%.0f", temp))
+}
+
+// SetBedTemp sets the bed target temperature.
+func (d *Driver) SetBedTemp(ctx context.Context, temp float64) error {
+	return d.postGCode(ctx, fmt.Sprintf("M140 S%.0f", temp))
+}
+
+// Extrude extrudes or retracts filament.
+func (d *Driver) Extrude(ctx context.Context, amount float64, feedrate float64) error {
+	return d.postGCode(ctx, fmt.Sprintf("G91\nG0 E%.2f F%.0f\nG90", amount, feedrate))
+}
+
 // UploadGCode uploads a G-code file to Moonraker's gcodes directory.
 func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
 	var buf bytes.Buffer

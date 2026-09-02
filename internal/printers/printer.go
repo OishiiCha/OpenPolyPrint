@@ -63,6 +63,13 @@ type Driver interface {
 	// axis is "X", "Y", or "Z". distance is in mm (can be negative).
 	// speed is in mm/min.
 	MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error
+	// SetNozzleTemp sets the nozzle target temperature in °C.
+	SetNozzleTemp(ctx context.Context, temp float64) error
+	// SetBedTemp sets the bed target temperature in °C.
+	SetBedTemp(ctx context.Context, temp float64) error
+	// Extrude extrudes (positive) or retracts (negative) filament by
+	// the given amount in mm at the given feedrate (mm/min).
+	Extrude(ctx context.Context, amount float64, feedrate float64) error
 	// UploadGCode sends a G-code file to the printer. The filename is the
 	// user-facing name (e.g. "benchy.gcode") and data is the raw file content.
 	// Returns nil on success.

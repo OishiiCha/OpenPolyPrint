@@ -220,6 +220,33 @@ func (m *Manager) MoveAxis(ctx context.Context, id string, axis string, distance
 	return d.MoveAxis(ctx, axis, distance, speed)
 }
 
+// SetNozzleTemp sets the nozzle target temperature on the requested printer.
+func (m *Manager) SetNozzleTemp(ctx context.Context, id string, temp float64) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.SetNozzleTemp(ctx, temp)
+}
+
+// SetBedTemp sets the bed target temperature on the requested printer.
+func (m *Manager) SetBedTemp(ctx context.Context, id string, temp float64) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.SetBedTemp(ctx, temp)
+}
+
+// Extrude extrudes or retracts filament on the requested printer.
+func (m *Manager) Extrude(ctx context.Context, id string, amount float64, feedrate float64) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.Extrude(ctx, amount, feedrate)
+}
+
 // UploadGCode sends a G-code file to the requested printer.
 func (m *Manager) UploadGCode(ctx context.Context, id string, filename string, data []byte) error {
 	d := m.Find(id)

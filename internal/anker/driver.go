@@ -367,15 +367,30 @@ func (d *Driver) SendGCode(ctx context.Context, command string) error {
 	return nil
 }
 
-// MoveAxis moves an axis by a relative distance using the native Move Step
-// command (0x0400). This is more reliable than sending raw G-code for jog
-// controls because the printer firmware handles it directly.
+// MoveAxis moves an axis by a relative distance. Uses G-code (G91/G0/G90)
+// since the native Move Step command (0x0400) doesn't work reliably on all
+// firmware versions. The G-code path was fixed in a previous commit (the
+// field name was wrong — "command" instead of "gcode").
 func (d *Driver) MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error {
-	return d.sendCommand(mqtt.CmdMoveStep, map[string]any{
-		"axis":  axis,
-		"step":  distance,
-		"speed": speed,
-	})
+	gcode := fmt.Sprintf("G91\nG0 %s%.2f F%.0f\nG90", axis, distance, speed)
+	return d.SendGCode(ctx, gcode)
+}
+
+// SetNozzleTemp sets the nozzle target temperature.
+func (d *Driver) SetNozzleTemp(ctx context.Context, temp float64) error {
+	return d.SendGCode(ctx, fmt.Sprintf("M104 S%.0f", temp))
+}
+
+// SetBedTemp sets the bed target temperature.
+func (d *Driver) SetBedTemp(ctx context.Context, temp float64) error {
+	return d.SendGCode(ctx, fmt.Sprintf("M140 S%.0f", temp))
+}
+
+// Extrude extrudes (positive) or retracts (negative) filament by the given
+// amount in mm at the given feedrate (mm/min).
+func (d *Driver) Extrude(ctx context.Context, amount float64, feedrate float64) error {
+	gcode := fmt.Sprintf("G91\nG0 E%.2f F%.0f\nG90", amount, feedrate)
+	return d.SendGCode(ctx, gcode)
 }
 
 // UploadGCode sends a G-code file to the printer via the PPPP file transfer

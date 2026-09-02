@@ -96,8 +96,11 @@ Strings encoded with `stringToBytes()` = `toUtf8()` (dartx `StringToUtf8Extensio
 |---------|---------|
 | 0x48 PinCode | `A1 <len> <pin UTF-8>` |
 | 0x42 WifiList | `A1 01 <1-byte arg>` `A2 02 <2 bytes>` (abCode-derived) |
-| 0x44 Activate | `A1 <timezone>` `A2 <domain>` `A3 <?>` `A4 <userId>` (4 TLVs, from `_setActivateData`) |
+| 0x44 Activate | `A1 <timezone (fallback "")>` `A2 <domain>` `A3 <timezone>` `A4 <userId>` — A3 is a second copy of the timezone bytes (from `_setActivateData` register tracking) |
+| 0x46 Control | **NOT TLV** — `dataBytes` = UTF-8 of `JsonEncoder.convert(args)` (generic JSON control) |
 | 0x4A Confirm / 0x4B SetFactory | no payload (empty dataBytes) |
+
+Command table is **complete**: only 7 `Byte` constants exist in the entire object pool (0x46/0x4B/0x43/0x44/0x48/0x42/0x4A) — no undiscovered command codes.
 
 (0x43's builder at 0x1824560 passes the `wifiInfo` map through without embedding TLV tags itself — native reads ssid/auth/pwd; see §5.)
 
@@ -106,7 +109,9 @@ Strings encoded with `stringToBytes()` = `toUtf8()` (dartx `StringToUtf8Extensio
 ```
 1.  Permissions (bleGetPermissionStatus / blePermission)
 2.  SearchDeviceApi.startSearch → onFindDevice(BleDevice{bleName,scanRecord,rssi,…})
-3.  BluetoothConnectApi.connectDevice (Pigeon, retried ×2) → MTU via bleGet0x0105Bytes {"slave_id":2,"bleMTU":N}
+3.  BluetoothConnectApi.connectDevice (Pigeon, retried ×2) — sends the **encoded BleDevice map**
+      `{mConnectionState, mBleAddress, bleName, deviceType, rssi, scanRecord, connectFailType, disconnectStatus}`
+      → MTU via bleGet0x0105Bytes {"slave_id":2,"bleMTU":N}
 4.  FACTORY STATE: "connectDevice success, but isFactory so do commandSetFactory"
       → sendCommand{commandCode 0x4B, no payload} → success route "nativePageTestProduct"
 5.  commandSendActivate (0x44: A1 timezone | A2 domain | A3 ? | A4 userId)
@@ -173,9 +178,10 @@ Built by **native** on request (`bleGet0xNNNNBytes` returns `List<Uint8List>`). 
 
 ## 7. Cloud / MQTT Registration
 
-- [x] `bindActive` result compared to `"true"`; `sendMqttCommand` channel; `CommandMqttSend` wire class
+- [x] `bindActive` result compared to `"true"`; `sendMqttCommand` channel; `CommandMqttSend` wire class; `getCMDInfo` channel `…DeviceSendFunctionApi.getCMDInfo`
 - [x] MQTT status JSON `{"commandType":1000/1068/1085/1192/1601,…}`; error codes 0xFB…/0xFD…
 - [x] devOnline/devOffline synthesize payloads with hardcoded message_id UUIDs (the debunked "UUIDs")
+- [x] **Community cross-reference**: [Ankermgmt/ankermake-m5-protocol](https://github.com/Ankermgmt/ankermake-m5-protocol) (ankerctl) documents the **cloud-side** MQTT/PPPP/HTTPS APIs (pppp keys fetched from cloud after credential import) — but has **no BLE provisioning coverage**. Our Dart-level BLE findings are new territory; after cloud bind, their MQTT/PPPP docs should slot in.
 
 ---
 
@@ -229,11 +235,10 @@ FDMWifiItemModel.toMap 0x18f0bb8  wifiConnectinAndBind 0x18f0ae0  bindActive 0x1
 
 - [ ] GATT service/characteristic UUIDs (native dex only)
 - [ ] Native framing of CommandSend → BLE bytes (header/seq/checksum/encryption; slave_id=2 register protocol)
-- [ ] `_setActivateData` tag A3 content (third value between domain and userId)
 - [ ] Confirm WifiManagerState 4/5 naming order
 - [ ] PIN transport security (native may encrypt the TLV)
 - [ ] Fix blutter crash (`FunctionAnalyzer::handleArgumentsDescriptorTypeArguments` via `handlePrologue`) → full IL for all functions
-- [ ] `_dataFormat` (0xff9b00): appends parsed k/v pairs to the 0x0103 map
+- [ ] `_dataFormat` (0xff9b00): appends parsed k/v pairs to the 0x0103 map (partial: iterates a string char-by-char, builds Uint8List via closure)
 
 ---
 
