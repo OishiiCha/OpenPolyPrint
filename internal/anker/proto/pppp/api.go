@@ -8,6 +8,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -666,10 +667,15 @@ func (a *PPPPApi) Run() {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// Normal timeout, continue
 			} else {
+				log.Printf("pppp run: recv error: %v", err)
 				break
 			}
 		} else {
-			_ = a.Process(msg)
+			log.Printf("pppp rx: %s", msg.MsgType())
+			if err := a.Process(msg); err != nil {
+				log.Printf("pppp run: process error: %v", err)
+				break
+			}
 		}
 
 		// Poll channels for retransmission
@@ -683,6 +689,7 @@ func (a *PPPPApi) Run() {
 		}
 	}
 
+	log.Printf("pppp run: event loop exiting")
 	_ = a.Send(PktClose{})
 }
 

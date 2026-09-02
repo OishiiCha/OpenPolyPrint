@@ -55,6 +55,8 @@ func (d *Driver) Type() string { return d.printer.Model }
 func (d *Driver) Connect(ctx context.Context) error {
 	hasConnection := false
 
+	log.Printf("anker connect %s: ip=%q duid=%q sn=%q", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID, d.printer.SN)
+
 	if d.printer.IPAddr != "" && d.printer.P2PDUID != "" {
 		duid, err := pppp.DuidFromString(d.printer.P2PDUID)
 		if err == nil {
@@ -74,9 +76,11 @@ func (d *Driver) Connect(ctx context.Context) error {
 						}
 					}
 					if api.State() == pppp.StateConnected {
+						log.Printf("anker pppp connected to %s at %s", d.printer.Name, d.printer.IPAddr)
 						d.api = api
 						hasConnection = true
 					} else {
+						log.Printf("anker pppp connect for %s: timed out waiting for state=Connected (final state=%s)", d.printer.Name, api.State())
 						api.Stop()
 						_ = api.Close()
 					}
@@ -90,6 +94,8 @@ func (d *Driver) Connect(ctx context.Context) error {
 		} else {
 			log.Printf("anker pppp duid for %s: %v", d.printer.Name, err)
 		}
+	} else {
+		log.Printf("anker pppp for %s: skipping LAN connection (ip=%q duid=%q)", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID)
 	}
 
 	if d.account != nil {
