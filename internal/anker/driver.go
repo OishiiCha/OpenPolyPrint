@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lucas/openpolyprint/internal/anker/proto/config"
@@ -23,6 +24,7 @@ type Driver struct {
 	printer    config.Printer
 	account    *config.Account
 	api        *pppp.PPPPApi
+	apiMu      sync.Mutex
 	mqttClient *mqtt.AnkerMQTTClient
 	mqttCtx    context.Context
 	mqttCancel context.CancelFunc
@@ -57,59 +59,11 @@ func (d *Driver) Connect(ctx context.Context) error {
 
 	log.Printf("anker connect %s: ip=%q duid=%q sn=%q", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID, d.printer.SN)
 
-	if d.printer.P2PDUID != "" {
-		duid, err := pppp.DuidFromString(d.printer.P2PDUID)
-		if err != nil {
-			log.Printf("anker pppp duid for %s: %v", d.printer.Name, err)
-		} else {
-			ipAddr := d.printer.IPAddr
-			// If IP is empty, discover it via LAN broadcast
-			if ipAddr == "" {
-				log.Printf("anker pppp for %s: IP empty, discovering via LAN broadcast...", d.printer.Name)
-				discoveredIP, err := pppp.DiscoverPrinterIP(duid, 5*time.Second)
-				if err != nil {
-					log.Printf("anker pppp for %s: LAN discovery failed: %v", d.printer.Name, err)
-				} else {
-					ipAddr = discoveredIP
-					log.Printf("anker pppp for %s: discovered printer IP %s", d.printer.Name, ipAddr)
-				}
-			}
-			if ipAddr != "" {
-				api, err := pppp.NewPPPPApiLAN(&duid, ipAddr)
-				if err == nil {
-					if err := api.ConnectLanSearch(); err == nil {
-						go api.Run()
-						deadline := time.Now().Add(30 * time.Second)
-						for api.State() != pppp.StateConnected && time.Now().Before(deadline) {
-							select {
-							case <-ctx.Done():
-								api.Stop()
-								_ = api.Close()
-								return ctx.Err()
-							default:
-								time.Sleep(100 * time.Millisecond)
-							}
-						}
-						if api.State() == pppp.StateConnected {
-							log.Printf("anker pppp connected to %s at %s", d.printer.Name, ipAddr)
-							d.api = api
-							hasConnection = true
-						} else {
-							log.Printf("anker pppp connect for %s: timed out waiting for state=Connected (final state=%s)", d.printer.Name, api.State())
-							api.Stop()
-							_ = api.Close()
-						}
-					} else {
-						_ = api.Close()
-						log.Printf("anker pppp connect for %s: %v", d.printer.Name, err)
-					}
-				} else {
-					log.Printf("anker pppp open for %s: %v", d.printer.Name, err)
-				}
-			}
-		}
-	} else {
-		log.Printf("anker pppp for %s: skipping LAN connection (no DUID)", d.printer.Name)
+	if err := d.connectPPPP(ctx); err != nil {
+		log.Printf("anker pppp for %s: %v", d.printer.Name, err)
+	}
+	if d.api != nil {
+		hasConnection = true
 	}
 
 	if d.account != nil {
@@ -126,6 +80,67 @@ func (d *Driver) Connect(ctx context.Context) error {
 		return fmt.Errorf("no local or cloud connection available")
 	}
 	return nil
+}
+
+// connectPPPP establishes the PPPP LAN connection. If the printer's IP is
+// empty, it discovers it via LAN broadcast. Safe to call multiple times.
+func (d *Driver) connectPPPP(ctx context.Context) error {
+	if d.api != nil {
+		return nil // already connected
+	}
+	if d.printer.P2PDUID == "" {
+		return fmt.Errorf("no P2P DUID in config")
+	}
+
+	duid, err := pppp.DuidFromString(d.printer.P2PDUID)
+	if err != nil {
+		return fmt.Errorf("parse DUID: %w", err)
+	}
+
+	ipAddr := d.printer.IPAddr
+	// If IP is empty, discover it via LAN broadcast
+	if ipAddr == "" {
+		log.Printf("anker pppp for %s: IP empty, discovering via LAN broadcast...", d.printer.Name)
+		discoveredIP, err := pppp.DiscoverPrinterIP(duid, 5*time.Second)
+		if err != nil {
+			return fmt.Errorf("LAN discovery failed: %w", err)
+		}
+		ipAddr = discoveredIP
+		log.Printf("anker pppp for %s: discovered printer IP %s", d.printer.Name, ipAddr)
+	}
+
+	api, err := pppp.NewPPPPApiLAN(&duid, ipAddr)
+	if err != nil {
+		return fmt.Errorf("open PPPP: %w", err)
+	}
+
+	if err := api.ConnectLanSearch(); err != nil {
+		_ = api.Close()
+		return fmt.Errorf("connect LAN search: %w", err)
+	}
+
+	go api.Run()
+	deadline := time.Now().Add(30 * time.Second)
+	for api.State() != pppp.StateConnected && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			api.Stop()
+			_ = api.Close()
+			return ctx.Err()
+		default:
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	if api.State() == pppp.StateConnected {
+		log.Printf("anker pppp connected to %s at %s", d.printer.Name, ipAddr)
+		d.api = api
+		return nil
+	}
+
+	api.Stop()
+	_ = api.Close()
+	return fmt.Errorf("timed out waiting for state=Connected (final state=%s)", api.State())
 }
 
 func (d *Driver) connectMQTT(ctx context.Context) error {
@@ -338,15 +353,22 @@ func (d *Driver) SendGCode(ctx context.Context, command string) error {
 }
 
 // UploadGCode sends a G-code file to the printer via the PPPP file transfer
-// protocol. If the PPPP LAN connection is not available, it returns an error.
+// protocol. If the PPPP LAN connection is not available, it attempts to
+// reconnect before returning an error.
 func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+	d.apiMu.Lock()
+	defer d.apiMu.Unlock()
+
 	if d.api == nil {
-		ip := d.printer.IPAddr
-		duid := d.printer.P2PDUID
-		if ip == "" || duid == "" {
-			return fmt.Errorf("pppp not available: printer has no IP/DUID (ip=%q duid=%q) — check Anker config", ip, duid)
+		log.Printf("[pppp] no connection for upload, attempting reconnect to %s...", d.printer.Name)
+		// Try to reconnect — this will run LAN discovery if IP is empty
+		if err := d.connectPPPP(ctx); err != nil {
+			return fmt.Errorf("pppp not available: reconnect failed for %s: %v (ip=%q duid=%q)", d.printer.Name, err, d.printer.IPAddr, d.printer.P2PDUID)
 		}
-		return fmt.Errorf("pppp not available: LAN connection to %s (%s) failed or not established (ip=%q duid=%q)", d.printer.Name, d.printer.Model, ip, duid)
+		if d.api == nil {
+			return fmt.Errorf("pppp not available: %s connected via MQTT only, PPPP LAN connection failed (ip=%q duid=%q). Printer may be offline or on a different network.", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID)
+		}
+		log.Printf("[pppp] reconnected successfully to %s", d.printer.Name)
 	}
 
 	cleanName := pppp.SanitizeFilename(filename)
