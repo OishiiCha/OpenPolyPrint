@@ -108,24 +108,6 @@ func applyAliases(statuses []printers.Status) []printers.Status {
 	return statuses
 }
 
-// findPrinterByNameOrAlias finds a printer driver by its original name or alias.
-func findPrinterByNameOrAlias(m *printers.Manager, name string) printers.Driver {
-	if d := m.FindByName(name); d != nil {
-		return d
-	}
-	// Check if name matches an alias
-	printerAliasesMu.RLock()
-	defer printerAliasesMu.RUnlock()
-	for id, alias := range printerAliases {
-		if strings.EqualFold(alias, name) {
-			if d := m.Find(id); d != nil {
-				return d
-			}
-		}
-	}
-	return nil
-}
-
 func buildManager(cfg *config.Config) *printers.Manager {
 	var drivers []printers.Driver
 	if cfg != nil {
