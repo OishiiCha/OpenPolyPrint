@@ -2669,9 +2669,11 @@ func main() {
 		}
 
 		var req struct {
-			Content      string `json:"content"`      // modified profile content (single section)
-			NewName      string `json:"newName"`      // new profile name
-			ProfileIndex *int   `json:"profileIndex"` // which profile was edited (for finding associated sections)
+			Content       string `json:"content"`       // modified profile content (single section)
+			NewName       string `json:"newName"`       // new profile name
+			ProfileIndex  *int   `json:"profileIndex"`  // which profile was edited (for finding associated sections)
+			Overwrite     bool   `json:"overwrite"`     // if true, keep original section name (overwrite on import)
+			ClearInherits bool   `json:"clearInherits"` // if true, remove inherits field for standalone profile
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -2706,9 +2708,24 @@ func main() {
 			}
 		}
 
-		// If newName is provided, replace the section header in the modified content
+		// If overwrite mode, keep the original section name (don't rename)
+		// This ensures eufyMake overwrites the existing profile on import
 		bundleContent := req.Content
-		if req.NewName != "" && (modSecType == "print" || modSecType == "filament" || modSecType == "printer") {
+		if req.Overwrite {
+			// Keep original section name - don't change the header
+			// modSecName stays as the original name from the section header
+			modSecName = ""
+			for _, line := range strings.Split(req.Content, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+					hdr := trimmed[1 : len(trimmed)-1]
+					if idx := strings.Index(hdr, ":"); idx > 0 {
+						modSecName = strings.TrimSpace(hdr[idx+1:])
+					}
+					break
+				}
+			}
+		} else if req.NewName != "" && (modSecType == "print" || modSecType == "filament" || modSecType == "printer") {
 			// Find the section header line and replace it
 			lines := strings.Split(bundleContent, "\n")
 			for i, line := range lines {
@@ -2716,6 +2733,19 @@ func main() {
 				if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 					lines[i] = "[" + modSecType + ":" + req.NewName + "]"
 					break
+				}
+			}
+			bundleContent = strings.Join(lines, "\n")
+		}
+
+		// If clearInherits, remove the inherits field from the modified content
+		// This makes the profile standalone instead of inheriting from a base
+		if req.ClearInherits {
+			lines := strings.Split(bundleContent, "\n")
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "inherits =") {
+					lines[i] = "inherits = "
 				}
 			}
 			bundleContent = strings.Join(lines, "\n")
@@ -2921,6 +2951,9 @@ func main() {
 			category = profilefiles.CategoryFilament
 		}
 		saveName := req.NewName
+		if req.Overwrite {
+			saveName = modSecName
+		}
 		if saveName == "" {
 			saveName = modSecName + " (Edited)"
 		}
@@ -2965,6 +2998,8 @@ func main() {
 			FilamentIndex *int   `json:"filamentIndex"` // optional: which filament to include in bundle
 			PrinterIndex  *int   `json:"printerIndex"`  // optional: which printer to include in bundle
 			SingleOnly    bool   `json:"singleOnly"`    // if true, export just the one section (no bundle)
+			Overwrite     bool   `json:"overwrite"`     // if true, keep original section name
+			ClearInherits bool   `json:"clearInherits"` // if true, remove inherits field
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -3078,17 +3113,30 @@ func main() {
 		}
 		// 2. Selected section (rename if newName provided and it's a print/filament/printer)
 		newSecName := secName
-		if req.NewName != "" && (secType == "print" || secType == "filament" || secType == "printer") {
+		if req.Overwrite {
+			// Keep original section name for overwriting on import
+			newSecName = secName
+			extractName = secName
+		} else if req.NewName != "" && (secType == "print" || secType == "filament" || secType == "printer") {
 			newSecName = req.NewName
 		}
+		secBody := selectedSec.body
 		if newSecName != secName {
 			// Replace the section header line
-			secBody := selectedSec.body
 			secBody = strings.Replace(secBody, "["+selectedSec.header+"]", "["+secType+":"+newSecName+"]", 1)
-			bundle.WriteString(secBody)
-		} else {
-			bundle.WriteString(selectedSec.body)
 		}
+		// If clearInherits, remove the inherits field
+		if req.ClearInherits {
+			lines := strings.Split(secBody, "\n")
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "inherits =") {
+					lines[i] = "inherits = "
+				}
+			}
+			secBody = strings.Join(lines, "\n")
+		}
+		bundle.WriteString(secBody)
 
 		// If singleOnly mode, just save this one section (no bundle)
 		if req.SingleOnly {

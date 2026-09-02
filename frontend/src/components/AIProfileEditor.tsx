@@ -28,7 +28,10 @@ interface AIProfileEditorProps {
   content: string
   profileName: string
   profileType: string
-  onSave: (newContent: string, newName: string) => Promise<void>
+  onSave: (newContent: string, newName: string, opts?: {
+    overwrite?: boolean
+    clearInherits?: boolean
+  }) => Promise<void>
 }
 
 export function AIProfileEditor({
@@ -48,6 +51,8 @@ export function AIProfileEditor({
   const [showRaw, setShowRaw] = useState(false)
   const [saving, setSaving] = useState(false)
   const [newName, setNewName] = useState('')
+  const [overwrite, setOverwrite] = useState(false)
+  const [clearInherits, setClearInherits] = useState(false)
   const [saved, setSaved] = useState(false)
   const hasFetched = useRef(false)
 
@@ -158,7 +163,10 @@ export function AIProfileEditor({
     setError(null)
     try {
       const modifiedContent = getModifiedContent()
-      await onSave(modifiedContent, newName || `${profileName} (AI Optimized)`)
+      await onSave(modifiedContent, newName || `${profileName} (AI Optimized)`, {
+        overwrite,
+        clearInherits,
+      })
       setSaved(true)
       setTimeout(() => onClose(), 1500)
     } catch (e) {
@@ -379,13 +387,39 @@ export function AIProfileEditor({
         {/* Footer with save */}
         {!loading && !saved && suggestions.length > 0 && (
           <div className="border-t border-slate-800 px-6 py-4">
+            {/* eufyMake import options */}
+            <div className="mb-3 flex flex-wrap gap-4">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={overwrite}
+                  onChange={(e) => setOverwrite(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-xs text-slate-300" title="Keep the original section name so eufyMake replaces the existing profile on import">
+                  Overwrite existing
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={clearInherits}
+                  onChange={(e) => setClearInherits(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-xs text-slate-300" title="Remove the inherits field so the profile is standalone">
+                  Standalone (clear inherits)
+                </span>
+              </label>
+            </div>
             <div className="flex items-center gap-3">
               <input
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="New file name..."
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={overwrite ? profileName : "New file name..."}
+                disabled={overwrite}
+                className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
               />
               <button
                 onClick={handleSave}
@@ -397,12 +431,17 @@ export function AIProfileEditor({
                 ) : (
                   <Save className="h-4 w-4" />
                 )}
-                Save as New File
+                {overwrite ? 'Overwrite Profile' : 'Save as New File'}
                 {hasChanges && ` (${acceptedCount})`}
               </button>
             </div>
             {!hasChanges && (
               <p className="mt-2 text-xs text-slate-500">Accept at least one suggestion to save</p>
+            )}
+            {overwrite && (
+              <p className="mt-2 text-xs text-amber-400">
+                Will keep the original name "{profileName}" so eufyMake overwrites the existing profile on import.
+              </p>
             )}
           </div>
         )}

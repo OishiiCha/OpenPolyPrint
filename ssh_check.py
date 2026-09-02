@@ -11,18 +11,24 @@ def run(cmd, timeout=30):
     if safe.strip():
         print(safe)
 
-# Check the remaining file's structure
-print("=== PETG (AI Optimized) - section headers ===\n")
-run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | grep -E '^#|^\\['", timeout=30)
+ORIG_ID = "pf_1788245236563261456"
 
-print("\n=== First 5 lines ===\n")
-run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | head -5", timeout=30)
+# Check printer_notes and related fields
+print("=== Printer notes field ===\n")
+run(f"curl -sk https://localhost/api/profile-files/{ORIG_ID} 2>&1 | grep -A 80 '^\\[printer:0.4mm Text\\]' | grep -E 'printer_notes|printer_model|printer_variant|inherits|preset|name =|model'", timeout=30)
 
-print("\n=== Last 10 lines ===\n")
-run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | tail -10", timeout=30)
+print("\n=== Full printer section (first 30 lines) ===\n")
+run(f"curl -sk https://localhost/api/profile-files/{ORIG_ID} 2>&1 | grep -A 30 '^\\[printer:0.4mm Text\\]'", timeout=30)
 
-print("\n=== Presets section ===\n")
-run("curl -sk https://localhost/api/profile-files/pf_1788305515179945415 2>&1 | grep -A 6 '^\\[presets\\]'", timeout=30)
+print("\n=== Print profile notes field ===\n")
+run(f"curl -sk https://localhost/api/profile-files/{ORIG_ID} 2>&1 | grep -B2 -A2 'notes = PRINT'", timeout=30)
+
+print("\n=== Filament notes/compatible fields ===\n")
+run(f"curl -sk https://localhost/api/profile-files/{ORIG_ID} 2>&1 | grep -A 80 '^\\[filament:Lucas PETG\\]' | grep -E 'notes|compatible|inherits|filament_type|temperature|bed_temperature' | head -15", timeout=30)
+
+# Check what the extracted file looks like
+print("\n=== Extracted PETG AI file - sections and key fields ===\n")
+run("curl -sk https://localhost/api/profile-files/pf_1788330176443528649 2>&1 | grep -E '^\\[|inherits|compatible_printers|printer_notes|notes =|settings_id'", timeout=30)
 
 client.close()
 print("DONE")

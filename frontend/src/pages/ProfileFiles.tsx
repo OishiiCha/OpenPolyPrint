@@ -621,6 +621,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
     filamentIndex: number
     printerIndex: number
     singleOnly: boolean
+    overwrite: boolean
+    clearInherits: boolean
   } | null>(null)
 
   // Detect format
@@ -686,6 +688,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
     printerIndex?: number
     singleOnly?: boolean
     newName?: string
+    overwrite?: boolean
+    clearInherits?: boolean
   }) => {
     setExtracting(profile.index)
     setError(null)
@@ -699,6 +703,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
           filamentIndex: opts?.filamentIndex,
           printerIndex: opts?.printerIndex,
           singleOnly: opts?.singleOnly || false,
+          overwrite: opts?.overwrite || false,
+          clearInherits: opts?.clearInherits || false,
         }),
       })
       if (!res.ok) {
@@ -770,7 +776,10 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
   }
 
   // Save from AI editor — creates a new profile file
-  const handleSaveFromAIEditor = async (newContent: string, newName: string) => {
+  const handleSaveFromAIEditor = async (newContent: string, newName: string, opts?: {
+    overwrite?: boolean
+    clearInherits?: boolean
+  }) => {
     // Use the save-bundle endpoint to produce a valid eufyMake config bundle
     // (includes header, associated filament/printer sections, and presets)
     const res = await fetch(`/api/profile-files/${file.id}/save-bundle`, {
@@ -780,6 +789,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
         content: newContent,
         newName: newName,
         profileIndex: aiEditorProfile?.index ?? undefined,
+        overwrite: opts?.overwrite || false,
+        clearInherits: opts?.clearInherits || false,
       }),
     })
     if (!res.ok) {
@@ -995,6 +1006,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
                                 filamentIndex: -1,
                                 printerIndex: -1,
                                 singleOnly: false,
+                                overwrite: false,
+                                clearInherits: false,
                               })}
                               disabled={extracting === profile.index}
                               className="flex items-center gap-1 rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
@@ -1289,6 +1302,8 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
             printerIndex: extractOptions.printerIndex >= 0 ? extractOptions.printerIndex : undefined,
             singleOnly: extractOptions.singleOnly,
             newName: extractOptions.newName,
+            overwrite: extractOptions.overwrite,
+            clearInherits: extractOptions.clearInherits,
           })}
           onClose={() => setExtractOptions(null)}
         />
@@ -1311,6 +1326,8 @@ function ExtractOptionsModal({
     filamentIndex: number
     printerIndex: number
     singleOnly: boolean
+    overwrite: boolean
+    clearInherits: boolean
   }
   profiles: IndividualProfile[]
   extracting: boolean
@@ -1397,6 +1414,41 @@ function ExtractOptionsModal({
               </label>
             </div>
           </div>
+
+          {/* Import behavior options */}
+          {!options.singleOnly && (
+            <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+              <label className="mb-1 block text-xs font-medium text-slate-400">eufyMake import behavior</label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={options.overwrite}
+                  onChange={(e) => onChange({ ...options, overwrite: e.target.checked })}
+                  className="rounded"
+                />
+                <div>
+                  <span className="text-sm text-slate-200">Overwrite existing profile</span>
+                  <span className="block text-xs text-slate-500">
+                    Keep the original section name so eufyMake replaces the existing profile on import
+                  </span>
+                </div>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={options.clearInherits}
+                  onChange={(e) => onChange({ ...options, clearInherits: e.target.checked })}
+                  className="rounded"
+                />
+                <div>
+                  <span className="text-sm text-slate-200">Make standalone (clear inherits)</span>
+                  <span className="block text-xs text-slate-500">
+                    Remove the inherits field so the profile doesn't depend on a base profile
+                  </span>
+                </div>
+              </label>
+            </div>
+          )}
 
           {/* Filament/printer selection (only in bundle mode) */}
           {!options.singleOnly && isPrint && filaments.length > 0 && (
