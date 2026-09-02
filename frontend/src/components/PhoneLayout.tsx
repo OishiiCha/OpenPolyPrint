@@ -363,6 +363,18 @@ function PrinterCard({ printer }: { printer: Printer }) {
                 <span>{printer.layerNum || 0} / {printer.layerCount}</span>
               </div>
             )}
+            {(printer.printSpeed ?? 0) > 0 && (
+              <div className="flex items-center gap-1.5 font-mono text-xs text-slate-600 dark:text-slate-300">
+                <Gauge className="h-3 w-3 text-slate-400" />
+                <span>{printer.printSpeed} mm/s</span>
+              </div>
+            )}
+            {(printer.usedFilament ?? 0) > 0 && (
+              <div className="flex items-center gap-1.5 font-mono text-xs text-slate-600 dark:text-slate-300">
+                <Layers className="h-3 w-3 text-slate-400" />
+                <span>{(printer.usedFilament ?? 0) >= 1000 ? `${((printer.usedFilament ?? 0) / 1000).toFixed(2)}m` : `${(printer.usedFilament ?? 0).toFixed(1)}mm`}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,6 +1,8 @@
 package anker
 
 import (
+	"encoding/json"
+	"log"
 	"sync"
 	"time"
 )
@@ -24,10 +26,13 @@ type PrinterState struct {
 	BedTemp       float64
 	SetBedTemp    float64
 
-	// Print speed / layers
-	PrintSpeed float64
+	// Print speed / layers (commandType 1005/1006)
+	PrintSpeed float64 // mm/s
 	LayerNum   int
 	LayerCount int
+
+	// Used filament in mm (commandType 1001 or 1006 — field name TBD)
+	UsedFilament float64
 
 	// State tracking
 	State        string // idle, printing, paused
@@ -49,6 +54,15 @@ func (ps *PrinterState) UpdateFromMQTT(data map[string]any) {
 	ps.LastUpdate = time.Now()
 
 	ct, _ := data["commandType"].(float64)
+
+	// Log all fields for commandTypes we care about, so we can discover
+	// what the printer actually sends (used filament, speed, etc.)
+	if ct == 1001 || ct == 1005 || ct == 1006 || ct == 1007 || ct == 1068 || ct == 1085 {
+		if js, err := json.Marshal(data); err == nil {
+			log.Printf("[anker-state] ct=%d fields=%s", int(ct), string(js))
+		}
+	}
+
 	switch int(ct) {
 	case 1001:
 		if name, ok := data["name"].(string); ok {
@@ -63,6 +77,14 @@ func (ps *PrinterState) UpdateFromMQTT(data map[string]any) {
 		if remain, ok := data["time"].(float64); ok {
 			ps.TimeRemain = int64(remain)
 			ps.TimeElapsed = ps.TotalTime - int64(remain)
+		}
+		// Used filament — try common field names
+		if uf, ok := data["usedFilament"].(float64); ok {
+			ps.UsedFilament = uf
+		} else if uf, ok := data["filamentUsed"].(float64); ok {
+			ps.UsedFilament = uf
+		} else if uf, ok := data["used"].(float64); ok {
+			ps.UsedFilament = uf
 		}
 		if ps.Progress > 0 && ps.Progress < 10000 {
 			ps.State = "printing"
@@ -88,13 +110,47 @@ func (ps *PrinterState) UpdateFromMQTT(data map[string]any) {
 		}
 
 	case 1005:
+		// 1005 is fan speed, not print speed — but some firmware versions
+		// may send print speed here too
 		if speed, ok := data["fanSpeed"].(float64); ok {
+			// Don't overwrite print speed with fan speed
+			_ = speed
+		}
+		if speed, ok := data["printSpeed"].(float64); ok {
+			ps.PrintSpeed = speed
+		}
+		if speed, ok := data["value"].(float64); ok {
 			ps.PrintSpeed = speed
 		}
 
 	case 1006:
+		// Print speed (mm/s) and layer info
 		if speed, ok := data["value"].(float64); ok {
 			ps.PrintSpeed = speed
+		}
+		if speed, ok := data["printSpeed"].(float64); ok {
+			ps.PrintSpeed = speed
+		}
+		if layer, ok := data["layerNum"].(float64); ok {
+			ps.LayerNum = int(layer)
+		}
+		if count, ok := data["layerCount"].(float64); ok {
+			ps.LayerCount = int(count)
+		}
+		if uf, ok := data["usedFilament"].(float64); ok {
+			ps.UsedFilament = uf
+		}
+
+	case 1068, 1085, 1192:
+		// Additional status message types seen in the protocol —
+		// log them and try to extract useful fields
+		if speed, ok := data["printSpeed"].(float64); ok {
+			ps.PrintSpeed = speed
+		}
+		if uf, ok := data["usedFilament"].(float64); ok {
+			ps.UsedFilament = uf
+		} else if uf, ok := data["filamentUsed"].(float64); ok {
+			ps.UsedFilament = uf
 		}
 		if layer, ok := data["layerNum"].(float64); ok {
 			ps.LayerNum = int(layer)
@@ -138,6 +194,7 @@ func (ps *PrinterState) Snapshot() map[string]any {
 		"bedTemp":       ps.BedTemp,
 		"setBedTemp":    ps.SetBedTemp,
 		"printSpeed":    ps.PrintSpeed,
+		"usedFilament":  ps.UsedFilament,
 		"layerNum":      ps.LayerNum,
 		"layerCount":    ps.LayerCount,
 		"lastUpdate":    ps.LastUpdate.Format(time.RFC3339),

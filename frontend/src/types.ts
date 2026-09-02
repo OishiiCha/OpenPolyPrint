@@ -17,6 +17,8 @@ export interface Printer {
   remainingTime?: string
   layerNum?: number
   layerCount?: number
+  printSpeed?: number   // mm/s
+  usedFilament?: number // mm
 }
 
 export interface GCodeFile {

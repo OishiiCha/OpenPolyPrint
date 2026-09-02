@@ -29,8 +29,10 @@ type Status struct {
 	Error         string    `json:"error,omitempty"`
 
 	// Print progress details (populated when available, e.g. Anker MQTT)
-	LayerNum   int `json:"layerNum,omitempty"`
-	LayerCount int `json:"layerCount,omitempty"`
+	LayerNum     int     `json:"layerNum,omitempty"`
+	LayerCount   int     `json:"layerCount,omitempty"`
+	PrintSpeed   float64 `json:"printSpeed,omitempty"`   // mm/s
+	UsedFilament float64 `json:"usedFilament,omitempty"` // mm of filament used
 }
 
 // PrinterConfig is the user-supplied configuration for a printer.

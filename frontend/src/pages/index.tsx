@@ -30,6 +30,7 @@ import {
   Play,
   Plus,
   Printer as PrinterIcon,
+  Gauge,
   Search,
   Settings as SettingsIcon,
   SlidersHorizontal,
@@ -403,6 +404,28 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                   </p>
                 </div>
               )}
+              {/* Print speed (mm/s) */}
+              {(printer.printSpeed ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                    <Gauge className="h-3 w-3" /> Speed
+                  </p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {printer.printSpeed} <span className="text-[10px] text-slate-400">mm/s</span>
+                  </p>
+                </div>
+              )}
+              {/* Used filament (mm) */}
+              {(printer.usedFilament ?? 0) > 0 && (
+                <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-slate-800/50">
+                  <p className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                    <Layers className="h-3 w-3" /> Filament
+                  </p>
+                  <p className="font-mono text-sm font-semibold text-slate-900 dark:text-white">
+                    {formatFilament(printer.usedFilament)}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -494,7 +517,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
           printerId={printer.id}
           printerName={printer.name}
           defaultMessage="Please analyze the printer status and camera images. Check for any print issues, suggest improvements, and provide a status summary."
-          contextText={`Printer: ${printer.name}\nStatus: ${printer.status}\nNozzle: ${printer.temps.nozzle}°C / ${printer.temps.targetNozzle}°C\nBed: ${printer.temps.bed}°C / ${printer.temps.targetBed}°C\nProgress: ${printer.progress}%\nFile: ${printer.currentFile || 'N/A'}\nLayer: ${printer.layerNum || 0}/${printer.layerCount || 0}`}
+          contextText={`Printer: ${printer.name}\nStatus: ${printer.status}\nNozzle: ${printer.temps.nozzle}°C / ${printer.temps.targetNozzle}°C\nBed: ${printer.temps.bed}°C / ${printer.temps.targetBed}°C\nProgress: ${printer.progress}%\nFile: ${printer.currentFile || 'N/A'}\nLayer: ${printer.layerNum || 0}/${printer.layerCount || 0}\nPrint Speed: ${printer.printSpeed || 0} mm/s\nFilament Used: ${formatFilament(printer.usedFilament)}`}
         />
       )}
 
@@ -668,6 +691,26 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                           <span className="font-mono text-sm font-semibold text-white">
                             Layer {printer.layerNum || 0} / {printer.layerCount}
                           </span>
+                        </div>
+                      )}
+                      {((printer.printSpeed ?? 0) > 0 || (printer.usedFilament ?? 0) > 0) && (
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {(printer.printSpeed ?? 0) > 0 && (
+                            <div className="flex items-center gap-2 rounded-lg bg-slate-800/50 px-3 py-2">
+                              <Gauge className="h-4 w-4 text-slate-400" />
+                              <span className="font-mono text-sm font-semibold text-white">
+                                {printer.printSpeed} mm/s
+                              </span>
+                            </div>
+                          )}
+                          {(printer.usedFilament ?? 0) > 0 && (
+                            <div className="flex items-center gap-2 rounded-lg bg-slate-800/50 px-3 py-2">
+                              <Layers className="h-4 w-4 text-slate-400" />
+                              <span className="font-mono text-sm font-semibold text-white">
+                                {formatFilament(printer.usedFilament)}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1897,6 +1940,14 @@ function formatDuration(s: number) {
   const m = Math.floor((s % 3600) / 60)
   const sec = Math.floor(s % 60)
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
+}
+
+// formatFilament converts mm of filament to a human-readable string.
+// Shows meters if >= 1000mm, otherwise mm with 2 decimals.
+function formatFilament(mm?: number): string {
+  if (!mm || mm <= 0) return '0mm'
+  if (mm >= 1000) return `${(mm / 1000).toFixed(2)}m`
+  return `${mm.toFixed(1)}mm`
 }
 
 function timeUntil(s?: string) {

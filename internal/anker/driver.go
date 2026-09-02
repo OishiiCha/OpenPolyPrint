@@ -233,6 +233,8 @@ func (d *Driver) Status() (printers.Status, error) {
 		UpdatedAt:     time.Now(),
 		LayerNum:      ps["layerNum"].(int),
 		LayerCount:    ps["layerCount"].(int),
+		PrintSpeed:    ps["printSpeed"].(float64),
+		UsedFilament:  ps["usedFilament"].(float64),
 	}
 
 	if s.Online {
