@@ -424,15 +424,22 @@ type PPPPApi struct {
 }
 
 // NewPPPPApi creates a new PPPP API client.
+// Uses an unconnected UDP socket (ListenUDP) so we can receive from any
+// source port. The printer may respond from a different port than 32108.
 func NewPPPPApi(duid *Duid, host string, port int) (*PPPPApi, error) {
 	addr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return nil, fmt.Errorf("resolve UDP address: %w", err)
 	}
 
-	conn, err := net.DialUDP("udp4", nil, addr)
+	// Listen on any available port — unconnected socket so we can recvfrom any source
+	listenAddr, err := net.ResolveUDPAddr("udp4", ":0")
 	if err != nil {
-		return nil, fmt.Errorf("dial UDP: %w", err)
+		return nil, fmt.Errorf("resolve listen addr: %w", err)
+	}
+	conn, err := net.ListenUDP("udp4", listenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen UDP: %w", err)
 	}
 
 	api := &PPPPApi{
@@ -601,7 +608,8 @@ func (a *PPPPApi) Send(msg Message) error {
 		dumper("tx", data, addr)
 	}
 
-	_, err := a.conn.Write(data)
+	// Use WriteToUDP since the socket is unconnected (ListenUDP)
+	_, err := a.conn.WriteToUDP(data, addr)
 	if err != nil {
 		return fmt.Errorf("send PPPP packet: %w", err)
 	}

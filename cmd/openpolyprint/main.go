@@ -206,19 +206,26 @@ func safeName(s string) string {
 // printing it. The gcodeStore is used to load the file data from disk.
 // The filename is the G-code file's name (used as the on-printer filename).
 func uploadAndPrint(ctx context.Context, d printers.Driver, store *gcode.Store, filename string) error {
+	log.Printf("[print] starting upload of %s (%d bytes)", filename, 0)
 	// Load the G-code data from the store
 	data, err := store.Load(filename)
 	if err != nil {
+		log.Printf("[print] failed to load gcode %s: %v", filename, err)
 		return fmt.Errorf("load gcode %s: %w", filename, err)
 	}
+	log.Printf("[print] loaded %s (%d bytes), uploading to printer...", filename, len(data))
 	// Upload to the printer first
 	if err := d.UploadGCode(ctx, filename, data); err != nil {
+		log.Printf("[print] upload failed for %s: %v", filename, err)
 		return fmt.Errorf("upload gcode: %w", err)
 	}
+	log.Printf("[print] upload complete, starting print of %s...", filename)
 	// Now start the print
 	if err := d.StartPrint(ctx, filename); err != nil {
+		log.Printf("[print] start failed for %s: %v", filename, err)
 		return fmt.Errorf("start print: %w", err)
 	}
+	log.Printf("[print] started %s successfully", filename)
 	return nil
 }
 
