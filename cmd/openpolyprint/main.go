@@ -202,6 +202,26 @@ func safeName(s string) string {
 	return s
 }
 
+// uploadAndPrint uploads a G-code file to the printer and then starts
+// printing it. The gcodeStore is used to load the file data from disk.
+// The filename is the G-code file's name (used as the on-printer filename).
+func uploadAndPrint(ctx context.Context, d printers.Driver, store *gcode.Store, filename string) error {
+	// Load the G-code data from the store
+	data, err := store.Load(filename)
+	if err != nil {
+		return fmt.Errorf("load gcode %s: %w", filename, err)
+	}
+	// Upload to the printer first
+	if err := d.UploadGCode(ctx, filename, data); err != nil {
+		return fmt.Errorf("upload gcode: %w", err)
+	}
+	// Now start the print
+	if err := d.StartPrint(ctx, filename); err != nil {
+		return fmt.Errorf("start print: %w", err)
+	}
+	return nil
+}
+
 func absInt64(x int64) int64 {
 	if x < 0 {
 		return -x
@@ -263,7 +283,7 @@ func stopAutoRecord(cameraMgr *cameras.Manager, printerID string, auto map[strin
 }
 
 // trackHistory watches printer statuses, records finished prints, and triggers auto-recording.
-func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager, sessMgr *printsession.Manager) {
+func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager, sessMgr *printsession.Manager, gcodeStore *gcode.Store) {
 	last := map[string]printers.Status{}
 	started := map[string]time.Time{}
 	autoRecordings := map[string]bool{}
@@ -355,7 +375,7 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 						if next := queueStore.NextPending(s.ID); next != nil {
 							queueStore.UpdateStatus(next.ID, "printing", "")
 							if d := m.Find(s.ID); d != nil {
-								if err := d.StartPrint(ctx, next.Filename); err != nil {
+								if err := uploadAndPrint(ctx, d, gcodeStore, next.Filename); err != nil {
 									log.Printf("[queue] auto-start %s on %s failed: %v", next.Filename, s.Name, err)
 									queueStore.UpdateStatus(next.ID, "failed", err.Error())
 								} else {
@@ -3759,7 +3779,7 @@ func main() {
 				return
 			}
 			queueStore.UpdateStatus(id, "printing", "")
-			if err := d.StartPrint(r.Context(), targetItem.Filename); err != nil {
+			if err := uploadAndPrint(r.Context(), d, gcodeStore, targetItem.Filename); err != nil {
 				queueStore.UpdateStatus(id, "failed", err.Error())
 				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 				return
@@ -4368,7 +4388,7 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr, sessMgr)
+	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr, sessMgr, gcodeStore)
 
 	// Serve the built frontend if dist/ exists next to the binary.
 	dist := findDistDir()
