@@ -85,6 +85,11 @@ func (d *StaticDriver) SendGCode(ctx context.Context, command string) error {
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)
 }
 
+// MoveAxis returns an error for the static driver.
+func (d *StaticDriver) MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error {
+	return fmt.Errorf("not implemented for %s", d.cfg.Type)
+}
+
 // UploadGCode returns an error for the static driver.
 func (d *StaticDriver) UploadGCode(ctx context.Context, filename string, data []byte) error {
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)

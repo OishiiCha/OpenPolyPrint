@@ -57,6 +57,10 @@ type Driver interface {
 	Cooldown(ctx context.Context) error
 	AutoLevel(ctx context.Context) error
 	SendGCode(ctx context.Context, command string) error
+	// MoveAxis moves an axis by a relative distance at the given speed.
+	// axis is "X", "Y", or "Z". distance is in mm (can be negative).
+	// speed is in mm/min.
+	MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error
 	// UploadGCode sends a G-code file to the printer. The filename is the
 	// user-facing name (e.g. "benchy.gcode") and data is the raw file content.
 	// Returns nil on success.

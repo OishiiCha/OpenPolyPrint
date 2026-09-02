@@ -318,12 +318,12 @@ func (d *Driver) sendCommand(cmd mqtt.MqttMsgType, fields map[string]any) error 
 
 // PausePrint pauses the active print.
 func (d *Driver) PausePrint(ctx context.Context) error {
-	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"value": 0})
+	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"control": 0})
 }
 
 // StopPrint stops the active print.
 func (d *Driver) StopPrint(ctx context.Context) error {
-	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"value": 2})
+	return d.sendCommand(mqtt.CmdPrintControl, map[string]any{"control": 2})
 }
 
 // Home homes all axes.
@@ -358,11 +358,22 @@ func (d *Driver) SendGCode(ctx context.Context, command string) error {
 		if line == "" || strings.HasPrefix(line, ";") {
 			continue
 		}
-		if err := d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"command": line}); err != nil {
+		if err := d.sendCommand(mqtt.CmdGcodeCommand, map[string]any{"gcode": line}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// MoveAxis moves an axis by a relative distance using the native Move Step
+// command (0x0400). This is more reliable than sending raw G-code for jog
+// controls because the printer firmware handles it directly.
+func (d *Driver) MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error {
+	return d.sendCommand(mqtt.CmdMoveStep, map[string]any{
+		"axis":  axis,
+		"step":  distance,
+		"speed": speed,
+	})
 }
 
 // UploadGCode sends a G-code file to the printer via the PPPP file transfer

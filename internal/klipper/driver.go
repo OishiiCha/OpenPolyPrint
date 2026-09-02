@@ -258,6 +258,11 @@ func (d *Driver) SendGCode(ctx context.Context, command string) error {
 	return d.postGCode(ctx, command)
 }
 
+// MoveAxis moves an axis by a relative distance using G-code.
+func (d *Driver) MoveAxis(ctx context.Context, axis string, distance float64, speed float64) error {
+	return d.postGCode(ctx, fmt.Sprintf("G91\nG0 %s%.2f F%.0f\nG90", axis, distance, speed))
+}
+
 // UploadGCode uploads a G-code file to Moonraker's gcodes directory.
 func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
 	var buf bytes.Buffer

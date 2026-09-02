@@ -1118,14 +1118,16 @@ function ControlsView({ printer, cameras }: { printer: Printer; cameras: Camera[
       })
       if (!res.ok) throw new Error(await res.text())
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Command failed'
       console.error(err)
-      alert(err instanceof Error ? err.message : 'Command failed')
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
     }
   }
 
   const jog = (axis: string, distance: number, feed: number) => {
-    const gcode = `G91\nG0 ${axis}${distance} F${feed}\nG90`
-    post('/gcode', { command: gcode })
+    post('/move', { axis, distance, speed: feed })
   }
 
   const liveCamera = cameras.find((c) => c.enabled && c.url)
@@ -1223,9 +1225,15 @@ function LevelingView({ printer }: { printer: Printer }) {
     try {
       const res = await fetch(`/api/printers/${printer.id}/level`, { method: 'POST' })
       if (!res.ok) throw new Error(await res.text())
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'success', message: 'Auto-leveling started' }
+      }))
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Command failed'
       console.error(err)
-      alert(err instanceof Error ? err.message : 'Command failed')
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
     }
   }
 

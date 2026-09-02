@@ -4100,6 +4100,37 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
+	mux.HandleFunc("/api/printers/{id}/move", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		var req struct {
+			Axis     string  `json:"axis"`
+			Distance float64 `json:"distance"`
+			Speed    float64 `json:"speed"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Axis == "" {
+			http.Error(w, `{"error":"axis required"}`, http.StatusBadRequest)
+			return
+		}
+		if req.Speed == 0 {
+			req.Speed = 3000
+		}
+		if err := mgr.Load().MoveAxis(r.Context(), id, req.Axis, req.Distance, req.Speed); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
 	// ---- Print session endpoints (AI data collection) ----
 	mux.HandleFunc("/api/printers/{id}/session", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

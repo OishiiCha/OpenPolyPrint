@@ -211,6 +211,15 @@ func (m *Manager) SendGCode(ctx context.Context, id string, command string) erro
 	return d.SendGCode(ctx, command)
 }
 
+// MoveAxis moves an axis by a relative distance on the requested printer.
+func (m *Manager) MoveAxis(ctx context.Context, id string, axis string, distance float64, speed float64) error {
+	d := m.Find(id)
+	if d == nil {
+		return fmt.Errorf("printer not found: %s", id)
+	}
+	return d.MoveAxis(ctx, axis, distance, speed)
+}
+
 // UploadGCode sends a G-code file to the requested printer.
 func (m *Manager) UploadGCode(ctx context.Context, id string, filename string, data []byte) error {
 	d := m.Find(id)
