@@ -613,9 +613,29 @@ func (a *PPPPApi) Process(msg Message) error {
 			a.chans[m.Chan].RxAck(m.Acks)
 		}
 
+	case PktDevLgnCrc:
+		// Respond to DEV_LGN_CRC with an empty DEV_LGN_ACK_CRC
+		_ = a.Send(PktDevLgnAckCrc{})
+
 	case PktHello:
 		host := Host{Afam: 2, Port: uint16(a.addr.Port), Addr: a.addr.IP.String()}
 		return a.Send(PktHelloAck{Host: host})
+
+	case PktPunchPkt:
+		// During the connecting phase, the printer sends a PUNCH_PKT.
+		// We respond with CLOSE followed by P2P_RDY to complete the handshake.
+		a.mu.Lock()
+		state := a.state
+		a.mu.Unlock()
+		if state == StateConnecting {
+			_ = a.Send(PktClose{})
+			if a.duid != nil {
+				err := a.Send(PktP2PRdy{Duid: *a.duid})
+				if err != nil {
+					return err
+				}
+			}
+		}
 
 	case PktP2PRdy:
 		if a.duid != nil {

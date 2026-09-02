@@ -325,8 +325,8 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 	}
 
 	cleanName := pppp.SanitizeFilename(filename)
-	userID := ""
-	machineID := ""
+	userID := "-"
+	machineID := "-"
 	if d.account != nil {
 		userID = d.account.UserID
 		machineID = d.printer.SN
@@ -335,13 +335,18 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 	// Build file upload info (CSV metadata)
 	info := pppp.FileUploadInfoFromData(data, cleanName, "OpenPolyPrint", userID, machineID, 0)
 
-	// Send FTBegin with file metadata
-	if _, err := d.api.AabbRequest(info.Bytes(), pppp.FTBegin, 0, 2, true); err != nil {
-		return fmt.Errorf("file upload begin: %w", err)
-	}
+	// Step 1: Send P2P_SEND_FILE command via XZYH to initiate file transfer.
+	// The Python reference sends a 16-char UUID string as the data.
+	uuidData := []byte("0123456789abcdef") // 16 chars, like uuid4()[:16]
+	d.api.SendXzyh(uuidData, pppp.P2PCmdP2PSendFile, 0, false)
 
-	// Send file data in chunks
-	const chunkSize = 8192
+	// Step 2: Send FTBegin with file metadata.
+	// The Python reference sends bytes(fui) + b"\x00" (two null terminators).
+	beginData := append(info.Bytes(), 0)
+	d.api.SendAabb(beginData, 0, 0, pppp.FTBegin, 1, true)
+
+	// Step 3: Send file data in 32KB chunks, waiting for reply on each.
+	const chunkSize = 32 * 1024
 	pos := uint32(0)
 	for pos < uint32(len(data)) {
 		end := pos + chunkSize
@@ -349,14 +354,14 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 			end = uint32(len(data))
 		}
 		chunk := data[pos:end]
-		if _, err := d.api.AabbRequest(chunk, pppp.FTData, pos, 2, true); err != nil {
+		if _, err := d.api.AabbRequest(chunk, pppp.FTData, pos, 1, true); err != nil {
 			return fmt.Errorf("file upload data at offset %d: %w", pos, err)
 		}
 		pos = end
 	}
 
-	// Send FTEnd
-	if _, err := d.api.AabbRequest(nil, pppp.FTEnd, uint32(len(data)), 2, true); err != nil {
+	// Step 4: Send FTEnd to complete the transfer (this also starts the print).
+	if _, err := d.api.AabbRequest(nil, pppp.FTEnd, uint32(len(data)), 1, true); err != nil {
 		return fmt.Errorf("file upload end: %w", err)
 	}
 

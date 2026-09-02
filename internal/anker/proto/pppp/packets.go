@@ -1024,6 +1024,12 @@ func (p PktDevLgnCrc) PackPayload() []byte {
 	return b
 }
 
+// PktDevLgnAckCrc is an empty DEV_LGN_ACK_CRC message.
+type PktDevLgnAckCrc struct{}
+
+func (p PktDevLgnAckCrc) MsgType() Type       { return TypeDevLgnAckCrc }
+func (p PktDevLgnAckCrc) PackPayload() []byte { return nil }
+
 // ─── Message Interface ───────────────────────────────────────────────────────
 
 // Message is the interface implemented by all PPPP packet types.
