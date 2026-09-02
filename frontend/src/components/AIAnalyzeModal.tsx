@@ -9,6 +9,7 @@ import {
   RefreshCw,
   MessageSquare,
   RotateCw,
+  Maximize2,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
@@ -66,10 +67,11 @@ export function AIAnalyzeModal({
   const [result, setResult] = useState<AIAnalysisResult | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [customMessage, setCustomMessage] = useState('')
+  const [expandedImage, setExpandedImage] = useState<string | null>(null)
   const abortRef = useRef(false)
 
-  const numPhotos = 5
-  const captureInterval = 2000 // 2 seconds between photos
+  const numPhotos = 10
+  const captureInterval = 1500 // 1.5 seconds between photos
 
   // Capture photos from camera (for printer source type)
   const capturePhotos = useCallback(async () => {
@@ -255,7 +257,8 @@ export function AIAnalyzeModal({
                       key={i}
                       src={`data:image/jpeg;base64,${p}`}
                       alt={`Capture ${i + 1}`}
-                      className="h-16 w-16 rounded-lg border border-slate-700 object-cover"
+                      className="h-16 w-16 cursor-pointer rounded-lg border border-slate-700 object-cover hover:border-blue-500"
+                      onClick={() => setExpandedImage(`data:image/jpeg;base64,${p}`)}
                     />
                   ))}
                 </div>
@@ -275,29 +278,49 @@ export function AIAnalyzeModal({
           {/* Phase: Selecting */}
           {phase === 'selecting' && (
             <div className="space-y-4">
-              <div>
-                <h3 className="mb-1 text-sm font-semibold text-slate-200">Select photo(s) to analyze</h3>
-                <p className="text-xs text-slate-400">
-                  {capturedPhotos.length} photo{capturedPhotos.length !== 1 ? 's' : ''} captured. Click to select/deselect.
-                  Selected photos will be sent to AI for analysis.
-                </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="mb-1 text-sm font-semibold text-slate-200">Select photo(s) to analyze</h3>
+                  <p className="text-xs text-slate-400">
+                    {capturedPhotos.length} photo{capturedPhotos.length !== 1 ? 's' : ''} captured. Click to select/deselect.
+                    Selected photos will be sent to AI for analysis.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedIndices(new Set(capturedPhotos.map((_, i) => i)))}
+                    className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setSelectedIndices(new Set())}
+                    className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
                 {capturedPhotos.map((p, i) => (
-                  <button
+                  <div
                     key={i}
-                    onClick={() => togglePhoto(i)}
-                    className={`relative overflow-hidden rounded-lg border-2 transition-all ${
+                    className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
                       selectedIndices.has(i)
                         ? 'border-blue-500 ring-2 ring-blue-500/30'
                         : 'border-slate-700 hover:border-slate-500'
                     }`}
                   >
-                    <img
-                      src={`data:image/jpeg;base64,${p}`}
-                      alt={`Photo ${i + 1}`}
-                      className="aspect-square w-full object-cover"
-                    />
+                    <button
+                      onClick={() => togglePhoto(i)}
+                      className="block w-full"
+                    >
+                      <img
+                        src={`data:image/jpeg;base64,${p}`}
+                        alt={`Photo ${i + 1}`}
+                        className="aspect-square w-full object-cover"
+                      />
+                    </button>
                     {selectedIndices.has(i) && (
                       <div className="absolute right-1 top-1 rounded-full bg-blue-600 p-0.5">
                         <CheckCircle2 className="h-3.5 w-3.5 text-white" />
@@ -306,7 +329,15 @@ export function AIAnalyzeModal({
                     <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] text-white">
                       #{i + 1}
                     </span>
-                  </button>
+                    {/* Expand button */}
+                    <button
+                      onClick={() => setExpandedImage(`data:image/jpeg;base64,${p}`)}
+                      className="absolute bottom-1 right-1 rounded bg-black/60 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      title="Expand"
+                    >
+                      <Maximize2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
 
@@ -382,9 +413,10 @@ export function AIAnalyzeModal({
                       .map((path, i) => (
                         <img
                           key={i}
-                          src={`/api/ai/chat/${result.id}/image/${path}`}
+                          src={`/api/ai/chat/${result.id}/image?path=${encodeURIComponent(path)}`}
                           alt={`Sent ${i + 1}`}
-                          className="h-16 w-16 rounded-lg border border-slate-700 object-cover"
+                          className="h-20 w-20 cursor-pointer rounded-lg border border-slate-700 object-cover transition-transform hover:scale-105 hover:border-blue-500"
+                          onClick={() => setExpandedImage(`/api/ai/chat/${result.id}/image?path=${encodeURIComponent(path)}`)}
                         />
                       ))}
                   </div>
@@ -440,6 +472,27 @@ export function AIAnalyzeModal({
           )}
         </div>
       </div>
+
+      {/* Image lightbox */}
+      {expandedImage && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setExpandedImage(null)}
+        >
+          <button
+            className="absolute right-4 top-4 rounded-lg bg-slate-800 p-2 text-slate-300 hover:bg-slate-700"
+            onClick={() => setExpandedImage(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={expandedImage}
+            alt="Expanded"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }

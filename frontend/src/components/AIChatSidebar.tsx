@@ -56,6 +56,7 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
   const [setupSnapshot, setSetupSnapshot] = useState(false)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [expandedImage, setExpandedImage] = useState<string | null>(null)
 
   const loadHistory = async () => {
     setHistoryLoading(true)
@@ -630,7 +631,8 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
                           key={imgIdx}
                           src={`/api/ai/chat/${conversation.id}/image?path=${encodeURIComponent(imgPath)}`}
                           alt={`Frame ${imgIdx + 1}`}
-                          className="rounded-lg max-h-48 w-full object-cover"
+                          className="cursor-pointer rounded-lg max-h-48 w-full object-cover transition-opacity hover:opacity-90"
+                          onClick={() => setExpandedImage(`/api/ai/chat/${conversation.id}/image?path=${encodeURIComponent(imgPath)}`)}
                         />
                       ))}
                     </div>
@@ -740,6 +742,27 @@ export function AIChatPane({ collapsed, onToggle }: AIChatPaneProps) {
             </div>
           )}
         </>
+      )}
+
+      {/* Image lightbox */}
+      {expandedImage && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setExpandedImage(null)}
+        >
+          <button
+            className="absolute right-4 top-4 rounded-lg bg-slate-800 p-2 text-slate-300 hover:bg-slate-700"
+            onClick={() => setExpandedImage(null)}
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={expandedImage}
+            alt="Expanded"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       )}
     </aside>
   )
