@@ -125,6 +125,8 @@ If Bluetooth capture is insufficient, we can also decompile the EufyMake APK:
 4. Find the encryption logic if payloads are encrypted
 5. This gives us the protocol without needing a live capture
 
+**Status: IN PROGRESS** — see [APK Decompilation Findings](apk-decompilation-findings.md) for the detailed template and log of what we've found.
+
 ---
 
 ## Timeline
