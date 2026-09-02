@@ -477,7 +477,7 @@ export function ProfileFiles() {
 
       {/* View modal */}
       {viewing && (
-        <ViewModal file={viewing} onClose={() => setViewing(null)} onRefresh={fetchAll} />
+        <ViewModal file={viewing} onClose={() => setViewing(null)} onRefresh={fetchAll} onConverted={() => setActiveTab('converted')} />
       )}
 
       {/* Edit modal */}
@@ -495,7 +495,7 @@ export function ProfileFiles() {
           file={converting}
           category="filament"
           onClose={() => { setConvertOpen(false); setConverting(null) }}
-          onConverted={() => { setConvertOpen(false); setConverting(null); fetchAll() }}
+          onConverted={() => { setConvertOpen(false); setConverting(null); fetchAll(); setActiveTab('converted') }}
         />
       )}
 
@@ -638,7 +638,7 @@ function UploadModal({ category, onClose, onUploaded }: { category: Category; on
   )
 }
 
-function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: () => void; onRefresh?: () => void }) {
+function ViewModal({ file, onClose, onRefresh, onConverted }: { file: ProfileFile; onClose: () => void; onRefresh?: () => void; onConverted?: () => void }) {
   const sections = file.content ? parseINI(file.content) : []
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState<string>('all')
@@ -788,11 +788,19 @@ function ViewModal({ file, onClose, onRefresh }: { file: ProfileFile; onClose: (
       const result = await res.json()
       onRefresh?.()
       setConverting(null)
-      // Show a simple success message
       setError(null)
-      alert(`Converted to OrcaSlicer: ${result.profiles?.length || 1} profile(s) generated. ${result.warnings?.join('; ') || ''}`)
+      const msg = `Converted to OrcaSlicer: ${result.profiles?.length || 1} profile(s) generated. ${result.warnings?.join('; ') || ''}`
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'success', message: msg }
+      }))
+      onConverted?.()
+      onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Convert failed')
+      const msg = e instanceof Error ? e.message : 'Convert failed'
+      setError(msg)
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
       setConverting(null)
     }
   }
@@ -1698,7 +1706,12 @@ function ConvertModal({ file, category, onClose, onConverted }: {
         }
         const data = await res.json()
         setResult(data)
-        if (data.savedId) onConverted()
+        if (data.savedId) {
+          window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+            detail: { type: 'success', message: `Profile converted to ${target}` }
+          }))
+          onConverted()
+        }
       } else if (uploadFile) {
         const formData = new FormData()
         formData.append('file', uploadFile)
@@ -1712,7 +1725,12 @@ function ConvertModal({ file, category, onClose, onConverted }: {
         }
         const data = await res.json()
         setResult(data)
-        if (data.savedId) onConverted()
+        if (data.savedId) {
+          window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+            detail: { type: 'success', message: `Profile converted to ${target}` }
+          }))
+          onConverted()
+        }
       } else {
         setError('Select a file to convert or choose a profile from the list')
       }
