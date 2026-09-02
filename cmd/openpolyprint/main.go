@@ -3739,22 +3739,32 @@ func main() {
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodPost:
 			// Start a queued item manually
-			if d := mgr.Load().Find(id); d != nil {
-				// Find the queue item by looking through the list
-				for _, item := range queueStore.List() {
-					if item.ID == id && item.Status == "pending" {
-						queueStore.UpdateStatus(id, "printing", "")
-						if err := d.StartPrint(r.Context(), item.Filename); err != nil {
-							queueStore.UpdateStatus(id, "failed", err.Error())
-							http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-							return
-						}
-						_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-						return
-					}
+			// First find the queue item to get its printerID
+			var targetItem *queue.QueueItem
+			for _, item := range queueStore.List() {
+				if item.ID == id && item.Status == "pending" {
+					targetItem = &item
+					break
 				}
 			}
-			http.Error(w, `{"error":"queue item not found or printer unavailable"}`, http.StatusNotFound)
+			if targetItem == nil {
+				http.Error(w, `{"error":"queue item not found or not pending"}`, http.StatusNotFound)
+				return
+			}
+			// Find the printer using the queue item's printerID (not the queue item ID)
+			d := mgr.Load().Find(targetItem.PrinterID)
+			if d == nil {
+				queueStore.UpdateStatus(id, "failed", "printer not found: "+targetItem.PrinterID)
+				http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
+				return
+			}
+			queueStore.UpdateStatus(id, "printing", "")
+			if err := d.StartPrint(r.Context(), targetItem.Filename); err != nil {
+				queueStore.UpdateStatus(id, "failed", err.Error())
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}

@@ -22,9 +22,11 @@ import {
   Home,
   Layers,
   Lightbulb,
+  ListOrdered,
   Maximize2,
   MoreVertical,
   Pause,
+  Play,
   Plus,
   Printer as PrinterIcon,
   Search,
@@ -1446,7 +1448,7 @@ export function PrinterDetail() {
   )
 }
 
-function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) => void }) {
+function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id: string) => void; printers: { id: string; name: string }[] }) {
   const analyzeFile = () => {
     window.dispatchEvent(new CustomEvent('openpolyprint-analyze-gcode', {
       detail: { gcodeId: file.id, gcodeName: file.name, printerId: file.printerId }
@@ -1454,6 +1456,8 @@ function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) =
   }
   const [menuOpen, setMenuOpen] = useState(false)
   const [thumbnail, setThumbnail] = useState<string | null>(null)
+  const [showPrintMenu, setShowPrintMenu] = useState(false)
+  const [printing, setPrinting] = useState(false)
 
   useEffect(() => {
     setThumbnail(null)
@@ -1462,6 +1466,45 @@ function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) =
       .then((data) => { if (data?.thumbnail) setThumbnail(data.thumbnail) })
       .catch(() => {})
   }, [file.id])
+
+  const startPrint = async (printerId: string) => {
+    setShowPrintMenu(false)
+    setPrinting(true)
+    try {
+      // Add to queue and immediately start
+      const res = await fetch('/api/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printerId, filename: file.name }),
+      })
+      if (!res.ok) throw new Error('Failed to queue')
+      const item = await res.json()
+      // Start it immediately
+      const startRes = await fetch(`/api/queue/${encodeURIComponent(item.id)}`, { method: 'POST' })
+      if (!startRes.ok) {
+        const d = await startRes.json().catch(() => ({ error: 'Start failed' }))
+        throw new Error(d.error || 'Start failed')
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Print failed')
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  const addToQueue = async (printerId: string) => {
+    setShowPrintMenu(false)
+    try {
+      const res = await fetch('/api/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printerId, filename: file.name }),
+      })
+      if (!res.ok) throw new Error('Failed to add to queue')
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Queue failed')
+    }
+  }
 
   return (
     <div
@@ -1490,6 +1533,49 @@ function FileRow({ file, onDelete }: { file: GCodeFile; onDelete: (id: string) =
         </div>
       </div>
       <div className="relative flex items-center gap-2">
+        {/* Print button with printer dropdown */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowPrintMenu(!showPrintMenu)}
+            disabled={printing || printers.length === 0}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-mono text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            title={printers.length === 0 ? 'No printers configured' : 'Print to...'}
+          >
+            {printing ? (
+              <CircleDot className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            Print
+          </button>
+          {showPrintMenu && (
+            <div className="absolute right-0 top-full z-20 mt-1 w-56 rounded-none border border-slate-700 bg-slate-950 shadow-xl">
+              <div className="border-b border-slate-800 px-3 py-2 font-mono text-xs text-slate-500">
+                Select printer:
+              </div>
+              {printers.map((p) => (
+                <div key={p.id} className="flex items-center justify-between border-b border-slate-800/50 last:border-0">
+                  <button
+                    type="button"
+                    onClick={() => startPrint(p.id)}
+                    className="flex flex-1 items-center gap-2 px-3 py-2 font-mono text-sm text-emerald-400 hover:bg-slate-900"
+                  >
+                    <Play className="h-3.5 w-3.5" /> {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addToQueue(p.id)}
+                    className="flex items-center gap-1 px-3 py-2 font-mono text-xs text-blue-400 hover:bg-slate-900"
+                    title="Add to queue only"
+                  >
+                    <ListOrdered className="h-3.5 w-3.5" /> Queue
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <Link
           to={`/gcode/${file.id}`}
           className="rounded-lg bg-blue-600 px-3 py-1.5 font-mono text-sm font-medium text-white hover:bg-blue-500"
@@ -1646,7 +1732,7 @@ export function GCode() {
                   </h3>
                   <div className="space-y-3">
                     {groupFiles.map((file) => (
-                      <FileRow key={file.id} file={file} onDelete={handleDelete} />
+                      <FileRow key={file.id} file={file} onDelete={handleDelete} printers={printers} />
                     ))}
                   </div>
                 </div>
