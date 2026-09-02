@@ -485,6 +485,67 @@ func NewPPPPApiBroadcast() (*PPPPApi, error) {
 	}, nil
 }
 
+// DiscoverPrinterIP broadcasts a LAN_SEARCH packet and waits for a printer
+// with the matching DUID to respond. Returns the printer's IP address.
+// This is used when the Anker API doesn't include ip_addr in the config.
+func DiscoverPrinterIP(duid Duid, timeout time.Duration) (string, error) {
+	// Listen on all interfaces so we can receive replies from any source
+	listenAddr, err := net.ResolveUDPAddr("udp4", ":0")
+	if err != nil {
+		return "", fmt.Errorf("resolve listen addr: %w", err)
+	}
+	conn, err := net.ListenUDP("udp4", listenAddr)
+	if err != nil {
+		return "", fmt.Errorf("listen UDP: %w", err)
+	}
+	defer conn.Close()
+
+	bcastAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("255.255.255.255:%d", LANPort))
+	if err != nil {
+		return "", fmt.Errorf("resolve broadcast addr: %w", err)
+	}
+
+	// Send LAN_SEARCH broadcast
+	searchPacket := PackMessage(PktLanSearch{})
+	for i := 0; i < 3; i++ {
+		_, err := conn.WriteToUDP(searchPacket, bcastAddr)
+		if err != nil {
+			return "", fmt.Errorf("send broadcast: %w", err)
+		}
+	}
+
+	// Wait for responses
+	deadline := time.Now().Add(timeout)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		return "", fmt.Errorf("set deadline: %w", err)
+	}
+
+	targetDuidStr := duid.String()
+	buf := make([]byte, 4096)
+	for time.Now().Before(deadline) {
+		n, srcAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				break
+			}
+			continue
+		}
+		data := buf[:n]
+		msg, _, err := ParseMessage(data)
+		if err != nil {
+			continue
+		}
+		// Printer responds with PktPunchPkt containing its DUID
+		if punch, ok := msg.(PktPunchPkt); ok {
+			if punch.Duid.String() == targetDuidStr {
+				return srcAddr.IP.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no printer with DUID %s responded within %v", targetDuidStr, timeout)
+}
+
 // SetDumper sets a callback function for logging packet traffic.
 func (a *PPPPApi) SetDumper(fn func(direction string, data []byte, addr net.Addr)) {
 	a.mu.Lock()

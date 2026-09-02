@@ -57,45 +57,59 @@ func (d *Driver) Connect(ctx context.Context) error {
 
 	log.Printf("anker connect %s: ip=%q duid=%q sn=%q", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID, d.printer.SN)
 
-	if d.printer.IPAddr != "" && d.printer.P2PDUID != "" {
+	if d.printer.P2PDUID != "" {
 		duid, err := pppp.DuidFromString(d.printer.P2PDUID)
-		if err == nil {
-			api, err := pppp.NewPPPPApiLAN(&duid, d.printer.IPAddr)
-			if err == nil {
-				if err := api.ConnectLanSearch(); err == nil {
-					go api.Run()
-					deadline := time.Now().Add(30 * time.Second)
-					for api.State() != pppp.StateConnected && time.Now().Before(deadline) {
-						select {
-						case <-ctx.Done():
+		if err != nil {
+			log.Printf("anker pppp duid for %s: %v", d.printer.Name, err)
+		} else {
+			ipAddr := d.printer.IPAddr
+			// If IP is empty, discover it via LAN broadcast
+			if ipAddr == "" {
+				log.Printf("anker pppp for %s: IP empty, discovering via LAN broadcast...", d.printer.Name)
+				discoveredIP, err := pppp.DiscoverPrinterIP(duid, 5*time.Second)
+				if err != nil {
+					log.Printf("anker pppp for %s: LAN discovery failed: %v", d.printer.Name, err)
+				} else {
+					ipAddr = discoveredIP
+					log.Printf("anker pppp for %s: discovered printer IP %s", d.printer.Name, ipAddr)
+				}
+			}
+			if ipAddr != "" {
+				api, err := pppp.NewPPPPApiLAN(&duid, ipAddr)
+				if err == nil {
+					if err := api.ConnectLanSearch(); err == nil {
+						go api.Run()
+						deadline := time.Now().Add(30 * time.Second)
+						for api.State() != pppp.StateConnected && time.Now().Before(deadline) {
+							select {
+							case <-ctx.Done():
+								api.Stop()
+								_ = api.Close()
+								return ctx.Err()
+							default:
+								time.Sleep(100 * time.Millisecond)
+							}
+						}
+						if api.State() == pppp.StateConnected {
+							log.Printf("anker pppp connected to %s at %s", d.printer.Name, ipAddr)
+							d.api = api
+							hasConnection = true
+						} else {
+							log.Printf("anker pppp connect for %s: timed out waiting for state=Connected (final state=%s)", d.printer.Name, api.State())
 							api.Stop()
 							_ = api.Close()
-							return ctx.Err()
-						default:
-							time.Sleep(100 * time.Millisecond)
 						}
-					}
-					if api.State() == pppp.StateConnected {
-						log.Printf("anker pppp connected to %s at %s", d.printer.Name, d.printer.IPAddr)
-						d.api = api
-						hasConnection = true
 					} else {
-						log.Printf("anker pppp connect for %s: timed out waiting for state=Connected (final state=%s)", d.printer.Name, api.State())
-						api.Stop()
 						_ = api.Close()
+						log.Printf("anker pppp connect for %s: %v", d.printer.Name, err)
 					}
 				} else {
-					_ = api.Close()
-					log.Printf("anker pppp connect for %s: %v", d.printer.Name, err)
+					log.Printf("anker pppp open for %s: %v", d.printer.Name, err)
 				}
-			} else {
-				log.Printf("anker pppp open for %s: %v", d.printer.Name, err)
 			}
-		} else {
-			log.Printf("anker pppp duid for %s: %v", d.printer.Name, err)
 		}
 	} else {
-		log.Printf("anker pppp for %s: skipping LAN connection (ip=%q duid=%q)", d.printer.Name, d.printer.IPAddr, d.printer.P2PDUID)
+		log.Printf("anker pppp for %s: skipping LAN connection (no DUID)", d.printer.Name)
 	}
 
 	if d.account != nil {
@@ -327,7 +341,12 @@ func (d *Driver) SendGCode(ctx context.Context, command string) error {
 // protocol. If the PPPP LAN connection is not available, it returns an error.
 func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
 	if d.api == nil {
-		return errors.New("pppp connection not available for file upload")
+		ip := d.printer.IPAddr
+		duid := d.printer.P2PDUID
+		if ip == "" || duid == "" {
+			return fmt.Errorf("pppp not available: printer has no IP/DUID (ip=%q duid=%q) — check Anker config", ip, duid)
+		}
+		return fmt.Errorf("pppp not available: LAN connection to %s (%s) failed or not established (ip=%q duid=%q)", d.printer.Name, d.printer.Model, ip, duid)
 	}
 
 	cleanName := pppp.SanitizeFilename(filename)
