@@ -5,6 +5,7 @@ import { loadConfig, loadConfigWithEnv, saveConfig, type AppConfig, type Provide
 import { Switch } from '../components/Switch'
 import { BedPreview } from '../components/BedPreview'
 import { GCodePreview } from '../components/GCodePreview'
+import { GCode3DViewer } from '../components/GCode3DViewer'
 import { CameraStream } from '../components/CameraStream'
 import { AutoScrollText } from '../components/AutoScrollText'
 import { TempChart } from '../components/TempChart'
@@ -148,7 +149,7 @@ function ConfirmModal({
   )
 }
 
-function PrinterGCodePreview({ fileName }: { fileName: string }) {
+function PrinterGCodePreview({ fileName, progress, layerNum, layerCount }: { fileName: string; progress?: number; layerNum?: number; layerCount?: number }) {
   const [gcode, setGcode] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -179,7 +180,7 @@ function PrinterGCodePreview({ fileName }: { fileName: string }) {
   if (loading) {
     return (
       <div className="mt-4 h-40 rounded-lg border border-slate-700 bg-slate-950 flex items-center justify-center">
-        <p className="font-mono text-xs text-slate-500">loading gcode preview...</p>
+        <p className="font-mono text-xs text-slate-500">loading 3D preview...</p>
       </div>
     )
   }
@@ -190,13 +191,15 @@ function PrinterGCodePreview({ fileName }: { fileName: string }) {
 
   return (
     <div className="mt-4">
-      <div className="mb-2 flex items-center gap-2">
-        <FileCode2 className="h-3.5 w-3.5 text-purple-400" />
-        <span className="font-mono text-xs text-slate-400">gcode preview</span>
-      </div>
-      <div className="h-48 rounded-lg border border-slate-700 overflow-hidden">
-        <GCodePreview gcode={gcode} className="w-full h-full" />
-      </div>
+      <GCode3DViewer
+        gcode={gcode}
+        progress={progress ? progress / 100 : 0}
+        currentLayer={layerNum}
+        totalLayerCount={layerCount}
+        bedWidth={220}
+        bedDepth={220}
+        bedHeight={250}
+      />
     </div>
   )
 }
@@ -404,8 +407,8 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
           </div>
         )}
 
-        {printer.status === 'Printing' && printer.currentFile && (
-          <PrinterGCodePreview fileName={printer.currentFile} />
+        {(printer.status === 'Printing' || printer.status === 'Heating') && printer.currentFile && (
+          <PrinterGCodePreview fileName={printer.currentFile} progress={printer.progress} layerNum={printer.layerNum} layerCount={printer.layerCount} />
         )}
 
         {(printer.status === 'Printing' || printer.status === 'Paused' || printer.status === 'Heating') && (
@@ -610,7 +613,7 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                       <div className="border-b border-slate-700 bg-slate-900 px-3 py-1.5">
                         <span className="text-xs font-medium text-slate-300">G-code Preview: {printer.currentFile}</span>
                       </div>
-                      <PrinterGCodePreview fileName={printer.currentFile} />
+                      <PrinterGCodePreview fileName={printer.currentFile} progress={printer.progress} layerNum={printer.layerNum} layerCount={printer.layerCount} />
                     </div>
                   )}
                 </div>
