@@ -457,6 +457,26 @@ func loadAuthPasscode(settingsFile string) string {
 	return ""
 }
 
+// sanitizeFilename removes path separators and dangerous characters from a
+// filename to prevent directory traversal.
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+	name = strings.ReplaceAll(name, "..", "")
+	// Only keep alphanumeric, dash, underscore, dot, space
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' || r == ' ' {
+			b.WriteRune(r)
+		}
+	}
+	result := b.String()
+	if result == "" || result == "." {
+		result = "untitled.md"
+	}
+	return result
+}
+
 // resolveAPIKey resolves the Gemini API key from settings.json, then env.
 func resolveAPIKey(settingsFile string) string {
 	if data, err := os.ReadFile(settingsFile); err == nil {
@@ -3786,6 +3806,122 @@ func main() {
 	mux.HandleFunc("/api/parts/value", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]float64{"totalValue": partStore.TotalValue()})
+	})
+
+	// ── Planning Documents API ────────────────────────────────────────
+	planningDir := filepath.Join(settingsDir, "..", "planning")
+	// Fallback: use the planning directory next to the executable
+	if _, err := os.Stat(planningDir); err != nil {
+		planningDir = "planning"
+	}
+	_ = os.MkdirAll(planningDir, 0o755)
+
+	mux.HandleFunc("/api/planning", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			entries, err := os.ReadDir(planningDir)
+			if err != nil {
+				http.Error(w, `{"error":"failed to read planning dir"}`, http.StatusInternalServerError)
+				return
+			}
+			type planFile struct {
+				Name     string `json:"name"`
+				Size     int64  `json:"size"`
+				Modified int64  `json:"modified"`
+				Title    string `json:"title"`
+			}
+			var files []planFile
+			for _, e := range entries {
+				if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil {
+					continue
+				}
+				// Extract title from first line
+				title := e.Name()
+				if data, err := os.ReadFile(filepath.Join(planningDir, e.Name())); err == nil {
+					lines := strings.Split(string(data), "\n")
+					for _, ln := range lines {
+						ln = strings.TrimSpace(ln)
+						if strings.HasPrefix(ln, "# ") {
+							title = strings.TrimSpace(strings.TrimPrefix(ln, "# "))
+							break
+						}
+					}
+				}
+				files = append(files, planFile{
+					Name:     e.Name(),
+					Size:     info.Size(),
+					Modified: info.ModTime().Unix(),
+					Title:    title,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(files)
+		case http.MethodPost:
+			var req struct {
+				Name    string `json:"name"`
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			// Sanitize filename — only allow alphanumeric, dash, underscore
+			name := sanitizeFilename(req.Name)
+			if !strings.HasSuffix(name, ".md") {
+				name += ".md"
+			}
+			path := filepath.Join(planningDir, name)
+			if err := os.WriteFile(path, []byte(req.Content), 0o644); err != nil {
+				http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"name": name})
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/planning/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := sanitizeFilename(r.PathValue("name"))
+		if !strings.HasSuffix(name, ".md") {
+			name += ".md"
+		}
+		path := filepath.Join(planningDir, name)
+		switch r.Method {
+		case http.MethodGet:
+			data, err := os.ReadFile(path)
+			if err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = w.Write(data)
+		case http.MethodPut:
+			var req struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			if err := os.WriteFile(path, []byte(req.Content), 0o644); err != nil {
+				http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case http.MethodDelete:
+			if err := os.Remove(path); err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
 	})
 
 	mux.HandleFunc("/api/temps", func(w http.ResponseWriter, r *http.Request) {

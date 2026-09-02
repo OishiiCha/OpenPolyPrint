@@ -4480,6 +4480,7 @@ export function Settings() {
               { to: '/queue', label: 'Print Queue' },
               { to: '/filament', label: 'Filament' },
               { to: '/maintenance', label: 'Maintenance' },
+              { to: '/planning', label: 'Planning' },
               { to: '/profile-files', label: 'Profile Files' },
               { to: '/stl-files', label: 'STL Library' },
               { to: '/plugs', label: 'Smart Plugs' },

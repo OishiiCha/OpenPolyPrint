@@ -23,6 +23,7 @@ import { SmartPlugs } from './pages/SmartPlugs'
 import { PrintAnalysis } from './pages/PrintAnalysis'
 import { Analytics } from './pages/Analytics'
 import { Maintenance } from './pages/Maintenance'
+import { Planning } from './pages/Planning'
 import { ProfileFiles } from './pages/ProfileFiles'
 import { STLFiles } from './pages/STLFiles'
 import { Login } from './pages/Login'
@@ -89,6 +90,7 @@ function App() {
             <Route path="queue" element={<PrintQueue />} />
             <Route path="filament" element={<Filament />} />
             <Route path="maintenance" element={<Maintenance />} />
+            <Route path="planning" element={<Planning />} />
             <Route path="profile-files" element={<ProfileFiles />} />
             <Route path="stl-files" element={<STLFiles />} />
             <Route path="plugs" element={<SmartPlugs />} />
