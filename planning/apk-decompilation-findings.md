@@ -143,12 +143,78 @@ Production-test flow exists separately: `lib_device/device_trash/ble_test/`
 - [x] Frame builders: **native-side** — Dart asks native for `List<Uint8List>` frames for cmd 0x0103/0x0105/0x0233/0x1029. `slave_id = 2` constant ⇒ register/Modbus-style addressing. **The encoder itself is in the encrypted dex.**
 - [ ] Raw BLE byte layout (header/seq/checksum/encryption): unknown — dump native dex or capture
 
+### 2d. Command Codes (CRACKED — from ble_command_utils.dart disassembly)
+
+> Each BLE command references a distinct `Byte` constant object in the Dart pool.
+> Disassembly of `commandSetFactory`, `commandSendWifiConnect`, `commandSendActivate`,
+> `commandSendPinCode`, `commandSendWifiList`, `commandDeviceConfirm`, `bleControl`
+> revealed the command code each one loads.
+
+| Command | Code (hex) | Code (dec) | Dart function |
+|---------|-----------|-----------|---------------|
+| WifiList | `0x42` | 66 | `commandSendWifiList` @0x1828c80 |
+| WifiConnect | `0x43` | 67 | `commandSendWifiConnect` @0x18244bc |
+| Activate | `0x44` | 68 | `commandSendActivate` @0x182603c |
+| bleControl | `0x46` | 70 | `bleControl` @0xfbf1dc |
+| PinCode | `0x48` | 72 | `commandSendPinCode` @0x18279d0 |
+| DeviceConfirm | `0x4A` | 74 | `commandDeviceConfirm` @0x19d8804 |
+| SetFactory | `0x4B` | 75 | `commandSetFactory` @0x170dc2c |
+
+### 2e. Payload Builders (from ble_command_utils.dart)
+
+> Found via caller scan: built a function index from blutter's asm files, mapped
+> each call site to its containing function. `ble_command_utils.dart` contains
+> `_setSendPinCodeData` and `_setRequestWifiData` — the exact payload builders.
+
+| Function | Address | Size | Purpose |
+|----------|---------|------|---------|
+| `_setSendPinCodeData` | 0x1827a74 | 0x21c | Builds PIN code payload (fields → bytes) |
+| `_setRequestWifiData` | 0x1828d2c | 0xd4 | Builds Wi-Fi request payload |
+| `_setActivateData` | 0x18260e0 | 0x9a0 | Builds activate payload (largest — most fields) |
+| `stringToBytes` | 0x182567c | 0x200 | Core encoder: converts string fields to UTF-8 byte lists |
+| `commandSetFactory` | 0x170dc2c | 0xb8 | Sends 0x4B |
+| `commandSendWifiConnect` | 0x18244bc | 0xa4 | Sends 0x43 |
+| `commandSendActivate` | 0x182603c | 0xa4 | Sends 0x44 |
+| `commandSendPinCode` | 0x18279d0 | 0xa4 | Sends 0x48 |
+| `commandSendWifiList` | 0x1828c80 | 0xac | Sends 0x42 |
+| `commandDeviceConfirm` | 0x19d8804 | 0xb8 | Sends 0x4A |
+| `bleControl` | 0xfbf1dc | 0xa8 | Sends 0x46 |
+| `commonMtuSize` | 0xfbf084 | 0x4c | MTU size getter |
+
+**Payload encoding**: Fields are converted via `stringToBytes()` → UTF-8 byte lists.
+The core encoder at 0xfbf720 handles length-prefix/padding rules (details still being
+disassembled).
+
+### 2f. Wire Format Objects (decoded from Dart pool)
+
+> Disassembled `CommandSend.ctor`, `CommandSend.decode`, `BleDevice.decode`,
+> `connectDevice`, `CommandReply.decode` — these contain every field name on the wire.
+
+**CommandSend** (the wire object sent to native):
+- Constructor @0xfbf284 (0x2b4 bytes)
+- Decode @0x13f1d70 (0x4d8 bytes)
+- Fields extracted from pool: `commandCode`, `mtuSize`, `dataMap`, `command`, `bleBytes`, `scanRecord`, `sendType`, `keepCmdSending`, `sendingStatusRollbackTime`
+
+**CommandReply** (response from native/printer):
+- Decode @0x13f0ed8 (0x2d8 bytes)
+- Contains: command code echo, status, data fields
+
+**BleDevice** (discovered device):
+- Decode @0x13f12e4 (0x3b8 bytes)
+- Fields: `bleName`, `bleAddress`, `bleMacFormat`, `bleType`, `scanRecord`, `devType`, `rssi`
+
+**connectDevice** @0x170d4dc (0x10c bytes):
+- Takes bleName, connects via native, retried ×2 on failure
+
 ---
 
 ## 3. Encryption / Key Exchange
 
 - [ ] BLE payload encryption: unknown (native side). PIN code is verified during bind (`commandSendPinCode` + `checkUsePinCode`); transport unknown.
 - [x] Ijiami `libijmDataEncryption*.so` encrypts the app dex (not necessarily BLE traffic).
+- [x] Payload field encoding: **UTF-8 via `stringToBytes()`** — confirmed by disassembling the core encoder at 0xfbf720 (calls `toUtf8`)
+- [x] Command codes are single-byte (0x42-0x4B) — no encryption on the command code itself
+- [ ] Whether the *data payload* (SSID, password, PIN) is encrypted before the UTF-8 conversion or after: need full `_setSendPinCodeData` / `_setActivateData` body analysis
 - [ ] Anker P2P layer AES: not reached (post-provisioning).
 - Hooks ready: `javax.crypto.Cipher` + GATT write via frida once app runs.
 
@@ -210,6 +276,7 @@ Production-test flow exists separately: `lib_device/device_trash/ble_test/`
 |---|---|
 | `fdm_base/communication/ble/ak_ble_manager.dart` | AKBleManager: connect/disconnect, get0x0103/0x0105/0x0233/1029Bytes, _dataFormat, state listeners |
 | `fdm_base/communication/ble/ak_ble_enum.dart` | WifiManagerState / BCBLEManagerState / BLESendState enums (+fromCode) |
+| `fdm_base/communication/ble/ble_command_utils.dart` | **Command payload builders**: _setSendPinCodeData, _setRequestWifiData, _setActivateData, stringToBytes, all command* functions |
 | `fdm_base/native_channel/channel/flutter_channel_device_send_fun.dart` | DeviceSendFunctionApi: sendCommand / sendMqttCommand / getCMDInfo |
 | `fdm_base/native_channel/fdmchannel/fdm_page_event_helper.dart` | notifyNative + all bind/wifi/scan native calls |
 | `lib_device/device_trash/add_device/add_device_scan_qr_page.dart` | commandSetFactory (from-factory entry) |
@@ -245,8 +312,11 @@ bleGetWifis 0x1900528        bindActive 0x18f7fec   devBleReConnect 0xff3bfc   d
 - [ ] What `_dataFormat` appends to the 0x0103 map (parses an argument string into extra k/v pairs)
 - [ ] Confirm exact name↔code for WifiManagerState 4/5
 - [ ] PIN: source (device sticker/QR/display?) and whether hashed in transit
-- [ ] Why full-analysis blutter segfaults (no-analysis works fine)
+- [x] ~~Why full-analysis blutter segfaults~~ — **diagnosed**: crash in blutter's prologue analyzer (`handleArgumentsDescriptorTypeArguments`); fixable upstream but manual capstone pipeline covers targeted functions
 - [ ] Ijiami anti-frida/anti-root checks (test on rooted device)
+- [ ] Full body of `_setActivateData` (0x9a0 bytes — largest payload builder, most fields)
+- [ ] Length-prefix/padding rules in core encoder 0xfbf720
+- [ ] Which fields go into each command payload (final detail pass in progress)
 
 ---
 
@@ -257,11 +327,18 @@ bleGetWifis 0x1900528        bindActive 0x18f7fec   devBleReConnect 0xff3bfc   d
 | Unpack .apkm / identify architecture | done | Flutter 3.5.4 + Ijiami shell |
 | String pool extraction | done | `libapp_strings.txt` |
 | **blutter decompile** | **done (--no-analysis)** | asm/ + pp.txt + objs.txt + frida script |
+| blutter full-analysis crash | **diagnosed** | SIGSEGV in `handleArgumentsDescriptorTypeArguments`; gdb backtrace captured |
 | Manual AOT disasm of key funcs | done | frame builders, command senders, enums |
 | Native method vocabulary + args | **done** | see §2a table |
 | State-machine codes | done | §2b |
 | wifiInfo payload keys | done | ssid/auth/pwd |
 | UUID candidates | **eliminated (wrong)** | they are MQTT message_ids; real UUIDs in native dex |
+| **Command codes cracked** | **done** | §2d — SetFactory=0x4B, WifiConnect=0x43, Activate=0x44, bleControl=0x46, PinCode=0x48, DeviceConfirm=0x4A, WifiList=0x42 |
+| **Payload builders located** | **done** | §2e — ble_command_utils.dart: _setSendPinCodeData, _setRequestWifiData, _setActivateData, stringToBytes |
+| **Wire format objects decoded** | **done** | §2f — CommandSend, CommandReply, BleDevice field names extracted |
+| **Payload encoding confirmed** | **done** | UTF-8 via stringToBytes() → toUtf8 |
+| Caller scan (who sends which frame) | **done** | function index built from asm, call sites mapped |
+| Full payload field mapping | **in progress** | disassembling _setSendPinCodeData, _setRequestWifiData, _setActivateData bodies |
 | GATT UUIDs / frame bytes | pending | need Ijiami dex dump (BlackDex) or runtime hook |
 | Live BLE capture | pending | |
 | Implement in Go | pending | |
@@ -269,11 +346,124 @@ bleGetWifis 0x1900528        bindActive 0x18f7fec   devBleReConnect 0xff3bfc   d
 
 ---
 
+## 13. Next Steps (Prioritized)
+
+### Step 1: Finish payload field mapping (IN PROGRESS)
+**What**: Complete the disassembly of `_setSendPinCodeData` (0x21c bytes), `_setRequestWifiData` (0xd4 bytes), and `_setActivateData` (0x9a0 bytes) to extract exactly which string fields go into each command payload.
+
+**How**: Continue the capstone disassembly pipeline with pool resolution:
+```bash
+# In Kali WSL — full raw disassembly of the three payload builders
+wsl -d kali-linux -e bash -c "python3 - <<'EOF'
+from capstone import *
+import re
+so = open('/home/lucas/apk/decomp/flat/libapp.so','rb').read()
+md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
+pool = {}
+for line in open('/home/lucas/apk/decomp/blutter_out/pp.txt'):
+    m = re.match(r'\[pp\+0x([0-9a-f]+)\] (.*)', line.rstrip())
+    if m: pool[int(m.group(1),16)] = m.group(2)[:140]
+for name,start,size in [('_setSendPinCodeData',0x1827a74,0x21c),
+                         ('_setRequestWifiData',0x1828d2c,0xd4),
+                         ('_setActivateData',0x18260e0,0x9a0)]:
+    print('='*14, name)
+    regs={}
+    for i in md.disasm(so[start:start+size], start):
+        s=f'{i.mnemonic} {i.op_str}'
+        # ... (same pool-resolution pattern as before)
+EOF"
+```
+**Goal**: For each command, know the exact list of fields and their order in the payload.
+
+### Step 2: Dump the Ijiami-encrypted native dex
+**What**: Extract the real Java/Kotlin dex from the Ijiami packer to find GATT UUIDs and the native frame encoder.
+
+**How (option A — BlackDex)**:
+```bash
+# On a rooted Android device with BlackDex installed
+# BlackDex hooks the Ijiami libexec.so and dumps the decrypted dex
+# Output: /sdcard/Android/data/com.googlecode.android.bb.blackdex/...
+```
+
+**How (option B — FRIDA-DEXDump)**:
+```bash
+# With frida server running on device
+pip install frida-tools
+frida-dexdump -U -f com.oceanwing.FDMPrint
+# Dumps all dex files at runtime, including the Ijiami-decrypted one
+```
+
+**How (option C — static probe)**:
+```bash
+# Probe ijiami.dat statically — it may be XOR/AES encrypted
+# Check libexec.so for the decryption routine
+strings assets/ijm_lib/*/libexec.so | grep -i "aes\|key\|decrypt"
+```
+
+**Goal**: Get the decrypted dex → decompile with jadx → find `BluetoothGattService` UUIDs and `writeCharacteristic` calls.
+
+### Step 3: Runtime frida hooks (if Step 2 fails)
+**What**: Hook the live app during a real BLE pairing to dump UUIDs and raw bytes.
+
+**How**:
+```bash
+# blutter_frida.js is already generated with all offsets
+# Add hooks for:
+#   - BluetoothGatt.writeCharacteristic (dump UUID + bytes)
+#   - BluetoothGattService.addService (dump service UUID)
+#   - BluetoothGatt.onCharacteristicChanged (dump notify data)
+frida -U -f com.oceanwing.FDMPrint -l blutter_frida.js
+# Then perform a real pairing in the app
+```
+
+**Goal**: Capture the actual GATT UUIDs and byte-level frame layout during a live pairing.
+
+### Step 4: Map the native→Dart event dispatcher
+**What**: Understand how native BLE events (notifications, scan results) are dispatched back to Dart.
+
+**How**: Disassemble the event handler functions in `fdm_base/native_channel/` — look for the callback registration and dispatch logic.
+
+**Goal**: Know the full bidirectional protocol — not just what Dart sends, but what native sends back.
+
+### Step 5: HCI snoop capture (parallel with above)
+**What**: Capture a real BLE pairing session at the HCI level.
+
+**How**:
+```bash
+# On Android: Settings → Developer Options → Enable Bluetooth HCI snoop log
+adb shell setprop persist.bluetooth.btsnooplog true
+# Perform pairing in EufyMake app
+adb bugreport bugreport.zip
+# Extract btsnoop_hci.log, open in Wireshark, filter btatt
+```
+
+**Goal**: Correlate HCI writes/notifications with the native methods we've documented. This confirms the byte layout and UUIDs.
+
+### Step 6: Implement in Go
+**What**: Build a BLE pairing implementation in OpenPolyPrint using `go-ble/ble`.
+
+**How**: Using all the data from steps 1-5:
+1. Implement BLE scanner filtering by `bleName` (e.g. "T5216*" for M5C)
+2. Connect to GATT, discover services (using UUIDs from Step 2/3/5)
+3. Send commands in order: SetFactory → Activate → PinCode → DeviceConfirm → WifiList → WifiConnect
+4. Each command: build payload with `stringToBytes` (UTF-8), prefix with command code (0x42-0x4B), write to the correct characteristic
+5. Listen on notify characteristic for CommandReply
+6. Parse WifiManagerState to detect success/wrong-password/timeout
+
+**Goal**: Pair a fresh M5/M5C without the EufyMake app.
+
+---
+
 ## Notes
 
 - **blutter usage**: full analysis crashes (SIGSEGV) on this snapshot; `--no-analysis` succeeds and still yields complete class/method/addr maps, the object pool (strings, enums, const maps), and `blutter_frida.js`. Function bodies were then disassembled ad-hoc with capstone + pool-offset resolution (`add xN, x27, #hi, lsl #12` + `ldr xN, [xN, #lo]` pattern).
+- **blutter crash diagnosed**: SIGSEGV in `handleArgumentsDescriptorTypeArguments` (prologue analyzer). GDB backtrace captured. Fixable upstream but the manual capstone pipeline already covers targeted functions.
+- **Caller scan technique**: Built a function index from blutter's asm files (sorted by address), then used `bisect` to find which function contains each call site address. This revealed `ble_command_utils.dart` as the payload builder module.
 - Code-reference scanning trick: scan `.text` for that 2-instruction pattern to map pool constants (strings/UUIDs) → using code. This is how the three "UUIDs" were debunked.
 - Ijiami payload: `assets/ijiami.dat` (9.5MB), `assets/ijiami.ajm` (2.9MB), `assets/IJMDal.Data` (50KB); runtime `assets/ijm_lib/*/libexec.so`.
 - The `commandType` JSON (1000/1068/…) is cloud/MQTT; the BLE provisioning link is binary frames built natively. Keep separate.
 - Wrong-password path: WifiManagerState `wifiPwError` (code 5) ← `wifiConnection` result; UI key `fdm_bind_wificonnect_pwderr`.
 - `nativePageTestProduct` route is entered after `commandSetFactory` succeeds — the factory/production test page chain.
+- **Command codes are single-byte** (0x42-0x4B) — no multi-byte framing on the command code itself. The data payload is UTF-8 encoded via `stringToBytes()`.
+- **`ble_command_utils.dart` is the key file** — it contains every command payload builder. Once the three `_set*Data` functions are fully disassembled, we'll know the exact field list for each command.
+- **The core encoder at 0xfbf720** handles length-prefix/padding — this is the last piece needed to know the exact byte layout of each payload.

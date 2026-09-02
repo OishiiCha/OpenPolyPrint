@@ -125,7 +125,30 @@ If Bluetooth capture is insufficient, we can also decompile the EufyMake APK:
 4. Find the encryption logic if payloads are encrypted
 5. This gives us the protocol without needing a live capture
 
-**Status: IN PROGRESS** — see [APK Decompilation Findings](apk-decompilation-findings.md) for the detailed template and log of what we've found.
+**Status: MAJOR PROGRESS** — see [APK Decompilation Findings](apk-decompilation-findings.md) for the full log.
+
+### What we've cracked so far
+- App is Flutter (Dart 3.5.4) + Ijiami packer — not a normal Java app
+- blutter `--no-analysis` works; full class/method/address maps extracted
+- **Command codes cracked**: SetFactory=0x4B, WifiConnect=0x43, Activate=0x44, bleControl=0x46, PinCode=0x48, DeviceConfirm=0x4A, WifiList=0x42
+- **Payload builders located**: `ble_command_utils.dart` — `_setSendPinCodeData`, `_setRequestWifiData`, `_setActivateData`, `stringToBytes` (UTF-8 encoder)
+- **Wire format objects decoded**: CommandSend, CommandReply, BleDevice field names
+- **Provisioning flow confirmed**: 11-step sequence from permissions → scan → connect → factory set → activate → PIN → confirm → WiFi scan → WiFi connect → bind → MQTT
+- **State machines decoded**: WifiManagerState (0=succ, 5=wrong password), BCBLEManagerState, BLESendState
+- **Wi-Fi format**: `{"ssid", "auth"/"encryptionType", "pwd"}`, WPA/WPA2 only
+
+### What's still missing
+- GATT service/characteristic UUIDs (in Ijiami-encrypted native dex)
+- Byte-level frame layout (length-prefix/padding rules in core encoder)
+- Full payload field mapping for each command (in progress)
+- Whether data payloads are encrypted beyond UTF-8 encoding
+
+### Next steps (see §13 of findings doc)
+1. **Finish payload field mapping** — disassemble `_setActivateData` (0x9a0 bytes) to get all fields
+2. **Dump Ijiami dex** — use BlackDex or FRIDA-DEXDump to get the native layer with GATT UUIDs
+3. **Runtime frida hooks** — `blutter_frida.js` is ready; hook `BluetoothGatt.writeCharacteristic` during live pairing
+4. **HCI snoop capture** — capture real BLE traffic, correlate with known command codes
+5. **Implement in Go** — using all extracted data to build BLE pairing in OpenPolyPrint
 
 ---
 
@@ -136,7 +159,7 @@ If Bluetooth capture is insufficient, we can also decompile the EufyMake APK:
 | Phase 1: Capture | 1-2 hours (need physical printer + phone) | Not started |
 | Phase 2: Analyse | 2-4 hours (Wireshark analysis) | Not started |
 | Phase 3: Implement | 1-2 days (Go BLE implementation) | Not started |
-| App decompilation | 1-2 hours (parallel with Phase 1) | Not started |
+| App decompilation | Ongoing | **~70% complete** — command codes, payload builders, wire format, provisioning flow all cracked; need GATT UUIDs + frame bytes |
 
 ---
 
