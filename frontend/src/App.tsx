@@ -28,6 +28,7 @@ import { STLFiles } from './pages/STLFiles'
 import { Login } from './pages/Login'
 import { BackgroundStreams } from './components/BackgroundStreams'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { ToastContainer } from './components/Toast'
 import { useAuth } from './hooks/useAuth'
 
 function useIsPhone() {
@@ -62,6 +63,7 @@ function App() {
     return (
       <BrowserRouter>
         <BackgroundStreams />
+        <ToastContainer />
         <PhoneLayout>
           <Routes>
             <Route index element={<Dashboard />} />
@@ -74,6 +76,7 @@ function App() {
   return (
     <BrowserRouter>
       <BackgroundStreams />
+      <ToastContainer />
       <ErrorBoundary>
         <Routes>
           <Route path="/" element={<Layout />}>

@@ -248,6 +248,17 @@ func (d *Driver) Status() (printers.Status, error) {
 			// it as Success. The printer keeps the file loaded after
 			// completion, so we can't rely on "Idle" + empty CurrentFile.
 			s.StatusText = "Finished"
+		} else if s.StatusText == "Idle" {
+			// Check if printer is heating — target temps set but not reached yet
+			nozzleTarget := ps["setNozzleTemp"].(float64)
+			bedTarget := ps["setBedTemp"].(float64)
+			nozzleCurrent := ps["nozzleTemp"].(float64)
+			bedCurrent := ps["bedTemp"].(float64)
+			if (nozzleTarget > 0 && nozzleCurrent < nozzleTarget-5) ||
+				(bedTarget > 0 && bedCurrent < bedTarget-5) {
+				s.StatusText = "Heating"
+				s.State = "heating"
+			}
 		}
 	} else {
 		s.StatusText = "Offline"
@@ -265,6 +276,8 @@ func humanizeState(state string) string {
 		return "Printing"
 	case "paused":
 		return "Paused"
+	case "heating":
+		return "Heating"
 	default:
 		return "Idle"
 	}

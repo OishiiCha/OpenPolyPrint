@@ -346,6 +346,27 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
           </div>
         )}
 
+        {printer.status === 'Heating' && (
+          <div className="mt-5 rounded-lg border border-rose-300/50 bg-rose-50 p-3 dark:border-rose-700/50 dark:bg-rose-950/30">
+            <div className="flex items-center gap-2">
+              <Flame className="h-4 w-4 animate-pulse text-rose-500" />
+              <p className="text-sm font-medium text-rose-700 dark:text-rose-300">Heating up...</p>
+            </div>
+            <div className="mt-2 space-y-1">
+              {printer.temps.targetNozzle > 0 && (
+                <p className="font-mono text-xs text-rose-600 dark:text-rose-400">
+                  Nozzle: {printer.temps.nozzle}° → {printer.temps.targetNozzle}°
+                </p>
+              )}
+              {printer.temps.targetBed > 0 && (
+                <p className="font-mono text-xs text-rose-600 dark:text-rose-400">
+                  Bed: {printer.temps.bed}° → {printer.temps.targetBed}°
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {printer.status === 'Printing' && (
           <div className="mt-5">
             <div className="mb-2 overflow-hidden text-xs text-slate-500 dark:text-slate-400">
@@ -387,26 +408,28 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
           <PrinterGCodePreview fileName={printer.currentFile} />
         )}
 
-        <div className="mt-5 flex gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowPauseConfirm(true)
-            }}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-          >
-            <Pause className="h-4 w-4" /> Pause
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setShowConfirm(true)
-            }}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-100 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50"
-          >
-            <Square className="h-4 w-4" /> Stop
-          </button>
-        </div>
+        {(printer.status === 'Printing' || printer.status === 'Paused' || printer.status === 'Heating') && (
+          <div className="mt-5 flex gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowPauseConfirm(true)
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              <Pause className="h-4 w-4" /> Pause
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowConfirm(true)
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-rose-100 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50"
+            >
+              <Square className="h-4 w-4" /> Stop
+            </button>
+          </div>
+        )}
 
         {/* Record button with dropdown */}
         {hasCamera && (
@@ -651,18 +674,25 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                   <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
                     <h3 className="mb-3 text-sm font-semibold text-white">Controls</h3>
                     <div className="space-y-2">
-                      <button
-                        onClick={() => setShowPauseConfirm(true)}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700"
-                      >
-                        <Pause className="h-4 w-4" /> Pause
-                      </button>
-                      <button
-                        onClick={() => setShowConfirm(true)}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-rose-900/40 px-3 py-2 text-sm font-medium text-rose-300 hover:bg-rose-900/60"
-                      >
-                        <Square className="h-4 w-4" /> Stop
-                      </button>
+                      {(printer.status === 'Printing' || printer.status === 'Paused' || printer.status === 'Heating') && (
+                        <>
+                          <button
+                            onClick={() => setShowPauseConfirm(true)}
+                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700"
+                          >
+                            <Pause className="h-4 w-4" /> Pause
+                          </button>
+                          <button
+                            onClick={() => setShowConfirm(true)}
+                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-rose-900/40 px-3 py-2 text-sm font-medium text-rose-300 hover:bg-rose-900/60"
+                          >
+                            <Square className="h-4 w-4" /> Stop
+                          </button>
+                        </>
+                      )}
+                      {printer.status !== 'Printing' && printer.status !== 'Paused' && printer.status !== 'Heating' && (
+                        <p className="py-2 text-center text-xs text-slate-500">No active print</p>
+                      )}
                       {onOpen && (
                         <button
                           onClick={() => { setExpanded(false); onOpen() }}
@@ -1468,6 +1498,7 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
   }, [file.id])
 
   const startPrint = async (printerId: string) => {
+    const printerName = printers.find(p => p.id === printerId)?.name || 'printer'
     setShowPrintMenu(false)
     setPrinting(true)
     try {
@@ -1485,14 +1516,22 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
         const d = await startRes.json().catch(() => ({ error: 'Start failed' }))
         throw new Error(d.error || 'Start failed')
       }
+      // Success — dispatch toast event
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'success', message: `Print started: ${file.name} → ${printerName}` }
+      }))
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Print failed')
+      const msg = e instanceof Error ? e.message : 'Print failed'
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
     } finally {
       setPrinting(false)
     }
   }
 
   const addToQueue = async (printerId: string) => {
+    const printerName = printers.find(p => p.id === printerId)?.name || 'printer'
     setShowPrintMenu(false)
     try {
       const res = await fetch('/api/queue', {
@@ -1501,8 +1540,14 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
         body: JSON.stringify({ printerId, filename: file.name }),
       })
       if (!res.ok) throw new Error('Failed to add to queue')
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'success', message: `Added to queue: ${file.name} → ${printerName}` }
+      }))
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Queue failed')
+      const msg = e instanceof Error ? e.message : 'Queue failed'
+      window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+        detail: { type: 'error', message: msg }
+      }))
     }
   }
 
