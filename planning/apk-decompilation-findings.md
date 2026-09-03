@@ -44,8 +44,15 @@ Artifacts (Kali): `~/apk/decomp/blutter_out/` (asm/, pp.txt 15MB, objs.txt, blut
 > **CORRECTION:** the three UUID-shaped strings in the pool are **NOT GATT UUIDs** — code-ref scanning shows they're hardcoded MQTT `message_id` values in `devOnline`/`devOffline` synthetic payloads (adjacent keys: entity/station/feature/device_info/message_id/station_sn/timestamp).
 
 ### Findings
-- [x] GATT UUIDs live **only in the encrypted native dex** — Dart never references them
-- [ ] Actual UUIDs: need runtime dump / Ijiami unpack / HCI capture
+- [x] **Advertising format (captured live 2026-09-02, M5C fresh/unbound):**
+  - Name: `M5C_E8:EE:CC:9F:E8:57` = `<model>_<MAC>` where MAC = advertiser address + 1 (E8:EE:CC:9F:E8:56 adv) — likely WiFi MAC
+  - Advertised service UUID: `fb349b5f-8044-3380-7210-656b4d416e41` (tail = ASCII `AnAMke`) — **advertising beacon only, not in the GATT table**
+  - Manufacturer data: `0xffff: 0101` (possible factory/unbound status flags — re-check after binding)
+- [x] **GATT table (enumerated live via `tools/ble_probe`):**
+  - Service **`0000414d-0000-1000-8000-00805f9b34fb`** (`0x414d` = ASCII "AM" = AnkerMake)
+  - Single characteristic **`00003344-0000-1000-8000-00805f9b34fb`** (handle 41, `0x3344` = ASCII "3D"), properties **write-without-response + notify** — one pipe for commands AND replies
+  - Plus standard GAP/GATT (0x1800/0x1801) with read-only chars; nothing else custom
+  - Default MTU 23 at connect → explains the app's early MTU negotiation (`bleGet0x0105Bytes {slave_id:2, bleMTU:N}`) before sending SSID/password TLVs
 - [x] Scan filtering: by **BLE name** (`bleName`/`devBleName`) + `bleType`; `BleDevice` carries `scanRecord` + `mBleAddress` + `rssi`
 
 ---
@@ -137,9 +144,97 @@ Callers of byte-builders (BL-scan): `get0x0233Bytes` ← `ak_bind_p2p_conn_model
 **BCBLEManagerState** (17): 0 unknown, 1 unsupported, 2 unauthorized, 3 poweredOff, 4 poweredOn, 7 scanErr, 8 scanTimeout, 0xb connectTimeout, 0xe disConnectErr
 **BLESendState**: 0 timeOutError, 3 otherError
 
-### 2g. Frame-level (0x0103/0x0105/0x0233/0x1527, slave_id=2)
+### 2g. Frame format on the wire — **DECODED (live capture 2026-09-02)**
 
-Built by **native** on request (`bleGet0xNNNNBytes` returns `List<Uint8List>`). Modbus-style `slave_id=2`. Register/transport framing unknown → in encrypted dex.
+The native framing around the command codes, captured from a fresh M5C via `tools/ble_probe monitor`:
+
+```
+[0:2]   4d 41        magic "MA" (ASCII — AnkerMake)
+[2:4]   len LE16     total frame length (heartbeat = 0x0019 = 25)
+[4:8]   05 01 01 05  constant header (version/flags — meaning TBD)
+[8]     CMD          command code — SAME numbering as the APK table (§2b)!
+[9:12]  c0 01 00     constant (flags/subcode — meaning TBD)
+[12:18] 6 bytes      varies every frame (nonce/counter/encrypted status — TBD)
+[18:24] 00 x6        zero padding
+[24]    XOR-8        checksum: XOR of ALL preceding bytes (verified on 4+ frames)
+```
+
+- Printer pushes an unsolicited **0x46 (bleControl) status heartbeat every ~3 s** immediately after GATT connect — before any write. This is how the app learns device state (likely incl. the factory/unbound flag).
+- MTU 23 default → heartbeat is exactly 25 bytes (fits ATT payload); larger commands need the app's MTU negotiation first.
+
+### 2h. Transport (from live enum)
+
+Single characteristic `00003344-…` (handle 41) — write-without-response for commands, notify for replies/heartbeat. See §1.
+
+### 2j. THE HANDSHAKE CAPTURED (official app, HCI snoop 2026-09-02 23:27) — protocol fully decoded
+
+**Why all Pi probes were dropped:** app→printer frames use header bytes `01 01 01 02` at [4:8]; the printer's own heartbeats use `05 01 01 05`. We mirrored the printer's header — wrong direction byte = silent drop. No crypto needed to be *heard*, just the right header.
+
+**App frame layout (64-byte prologue):**
+```
+[0:2]   4d 41       magic "MA"
+[2:4]   len LE16    total incl. xor byte
+[4:8]   01 01 01 02  client header (heartbeat uses 05 01 01 05)
+[8]     CMD
+[9:12]  flags       c0 01 00 (simple cmds) | c1 01 00 + c3 02 00 (0x46 control, sent in pairs)
+[12:14] seq LE16    increments across session (0x40b5, 0x40b8, … 0x410a)
+[14:32] session id  18 bytes, e.g. 98 6a 63 35 63 66 61 37 35 35 64 63 63 34 34 61 32 35 ("…c5cfa755dcc4a25") — source TBD (app session? account?)
+[32:64] zeros
+[64:-1] payload     (encrypted after handshake; first frames plaintext-ish TLV)
+[-1]    XOR-8       verified xor-ok on all app frames
+```
+
+**Printer replies** arrive as notifications **fragmented into 20-byte ATT chunks** (MTU 23, no MTU exchange ever) — reassembly by len field required. Observed reply sizes: 252B (to 0x45), 41B (0x49/0x4A/0x43/0x44 acks), 57B/73B (wifi-list entries), 425B/345B (0x46 control pairs), 137B (status).
+
+**Session flow (captured):**
+```
+0x45 (136B): TLV A1[65] = 0x04 || X || Y  → app's P-256 ECDH PUBLIC KEY (uncompressed)
+             TLV A2[2] = 05 02 (curve/params id)
+   ← 252B reply (printer key/cert, encrypted from 0x49 on)
+0x49 (113B): challenge/verify (encrypted payload)
+0x4A confirm (81B, 16B encrypted payload) ← the button-press step (user confirms on printer)
+0x42 wifi_list → 6 × (57B/73B) fragmented entries
+0x43 wifi_connect (129B) ← 41B ack
+0x44 activate (177B) ← 41B ack
+0x46 control pairs (c101:180B + c302:110B, same session) — ongoing status/printing channel
+```
+
+**Crypto**: A1[65]=0x04-prefixed EC point = P-256 ECDH — same family as Anker PPPP crypto already implemented in `internal/anker/proto/crypto/ecdh.go`. Post-handshake payloads are encrypted (high-entropy), key presumably ECDH-derived. Heartbeat "random" 6 bytes = likely encrypted/rolling session state.
+
+### 2k. Our own sessions (2026-09-02/03, Pi as client) — handshake REPRODUCED
+
+- **Header fix**: app frames = `01 01 01 02` at [4:8]; **len field includes the XOR byte**. Both facts were the entire "silent drop" mystery.
+- **0x45 handshake works from our own client**: send TLV `A1[65]=secp256k1 uncompressed pubkey` + `A2[2]=0502` → printer replies 252B with ITS ephemeral k1 pubkey + plaintext metadata:
+  - `A3` `{"marlin_hw_version":"V2.0.0","junzheng_hw_version":"V8110_HW_V2.0"}`
+  - `A4` `{"device_sn":"AK75D7D345000049","nozzle_hw_version":"0.0.4"}`
+  - `A5` `"V3.1.56"` (firmware)
+- **Curve: secp256k1** (verified: printer point valid on k1, invalid on r1/SM2). Keys are **ephemeral** (printer rotates per connection). Client keys are apparently not curve-checked (our r1 key was accepted).
+- **ECDH shared secret computed in 3 own sessions** (working code in `tools/ble_probe/maclient3+`). Reference pair: shared `3c058b30…92f1` → session token `14d2e781aaa0150996f5cc34354e7fc9`.
+- **ACK semantics**: post-handshake, commands get 41B cmd-matched ACKs: `[4B nonce][8B zeros][16B session token][xor]`. Token = constant within a session, changes per session; pre-handshake (0x40-error era) token was device-constant `9c46cc9dff7c323a1259c0bdc6fcd236` across connections.
+- **Session id field is client-generated**: the app invented `986a…25` per session and the printer accepts arbitrary values (ours worked).
+- **Commands do NOT execute without an encrypted payload**: every app command carries one (0x4A/0x42: 16B = 1 AES block; 0x49: 48B; 0x43: 64B; 0x44: 112B; 0x46 pairs: 116B/45B). Empty/garbage payloads → generic ACK, no execution. 0x49 is optional (2nd app round skipped it before 0x4A/0x42).
+- **Failed derivations (ruled out)**: session token ≠ any of {md5/sha1/sha256/hmac/AES-ECB combos of shared, pubs, dev_const, MAC, SN, hex-strings} (30+ candidates × 3 known pairs). Command-payload key ≠ {md5(s), sha(s) halves, s-halves} × {zeros, token, md5(s)} × {ECB, CBC-0} (24 candidates live-tested — all generic ACKs).
+- **Replay experiment (decisive)**: the app's exact captured frames (0x45 → 0x4A → 0x42 ×2 → 0x43 → 0x44, machine-verified bytes) sent from our own connection → handshake answered with the printer's NEW ephemeral key, all commands ACK'd, **zero execution, no confirm beep**. ⇒ **Command ciphertexts are bound to the session's ephemeral ECDH; the key is NOT device-static.** The DSK (cloud device key `xdgfZrMLEVuRBTOs4aAi`, confirmed present in OpenPolyPrint config) may contribute to the KDF (e.g. f(DSK, session-secret)) but is not sufficient alone.
+- **Connection model (tested)**: the M5C accepts **one BLE connection at a time** — while the Pi holds a connection, the phone app cannot connect (and vice versa). No concurrent observation possible; MITM at GATT level is structurally impossible without dedicated sniffer hardware.
+- Anomaly for future work: the 0x44 (activate) replay ACK returned a DIFFERENT session token (`e0ba83f4…`) than all other ACKs in that session (`aec5b40c…`) — first observed mid-session state change.
+- **Campaign totals**: ~55 offline derivations + ~84 live candidates (AES/curse/simple × key families × plaintexts) + full-sequence replay — all negative on command execution. Handshake, framing, identity, and ACK layer: fully working from the Pi.
+- **The remaining unknown (final)**: the KDF from (session ECDH secret [, DSK]) → command-encryption key, and the command plaintext envelope. This exists only in the Ijiami-encrypted native dex. **Path to finish: BlackDex (or FRIDA-DEXDump) on any rooted Android → dump decrypted dex → jadx → locate BleCommandUtils/CommandSend native implementations → extract KDF + cipher.** Everything else needed to implement local provisioning is already documented in this file and proven live.
+
+### 2i. Live probe results (2026-09-02, pre-discovery)
+
+- Heartbeat cadence: precisely ~3.015 s — makes it easy to distinguish replies from scheduled frames. XOR-8 checksum verified live on hundreds of frames (`[xor-ok]`).
+- **All rounds SILENTLY DROPPED** (heartbeats stayed on the 3.015s grid after every write):
+  - raw bytes, `[slave_id][cmd]`, replayed heartbeat
+  - minimal + full MA frames, all 7 command codes, with/without TLV payloads
+  - write-with-response vs without; flags variants (`c00100/c00101/000100`); header variant (`0101→0000`)
+  - token-echo frames (printer's last 6-byte token embedded, auto-copied)
+  - **v3: byte-perfect 25B frames — len=0x19 (incl. checksum), valid XOR, structure identical to genuine frames — still dropped**
+- One apparent grid deviation (22:33 session) did not reproduce on clean repeats — radio hiccup, not a signal.
+- **Conclusion: the command channel is session-gated (encrypted or handshake-protected). Plaintext probing is exhausted.**
+- Remaining gates tested next: LE pairing (`bluetoothctl pair` + retry).
+- **Pairing result: REFUSED** — `bluetoothctl pair` connects and resolves services, but `Paired: no / Bonded: no`. The M5C has **no LE link-layer security**; the command gate is purely application-layer crypto in the app's first writes.
+- Peripheral details from BlueZ `info`: address type **public**, advertising flags `0x06` (BR/EDR not supported, general discoverable), ManufacturerData `0xffff: 0101`, handle of `3344` char value = **0x002A** (decl 0x29).
+- **Decisive next step: HCI snoop capture of one official-app setup** — decode with `tools/ble_probe/hci_decode.py`. Note: OpenPolyPrint's `internal/anker/proto/crypto` already implements Anker's PPPP crypto (ECDH, seccode, "curse") — the BLE session handshake may reuse the same family; compare the first app→printer writes in the capture against those implementations before assuming something new.
 
 ---
 
@@ -256,11 +351,101 @@ FDMWifiItemModel.toMap 0x18f0bb8  wifiConnectinAndBind 0x18f0ae0  bindActive 0x1
 | wifiInfo structure {ssid,auth,pwd} | done | §5 |
 | UUID candidates | eliminated | MQTT message_ids; real UUIDs in native dex |
 | Ijiami static unpack | **dead end** | entropy ≈8, SecLLVM; needs runtime dump |
-| GATT UUIDs / native framing | pending | requires Android runtime (emulator/device) |
-| Live BLE capture | pending | |
+| GATT UUIDs | **done (live)** | service `414d` ("AM"), char `3344` ("3D") w/wo-response+notify, handle 41 |
+| Native framing | **done** | MA frames, direction headers, XOR-8, len-incl-xor, 64B client prologue, seq+session |
+| Handshake (0x45, secp256k1 ECDH) | **done (own client)** | shared secret extracted 3×; printer SN/firmware read |
+| Command execution | **blocked on KDF** | needs session-key derivation for the encrypted command payloads |
+| Unpack Ijiami dex (BlackDex) | pending | fastest route to the KDF |
+| Live BLE capture | **done** | official app HCI capture decoded |
 | Implement in Go | pending | Dart-level protocol now implementable except native framing |
 
 ---
+
+## 14. Key rotation & bound-state discovery (2026-09-03)
+
+- **DSK and mqtt_key ROTATE on every factory-reset + re-bind** — proven by log forensics: OpenPolyPrint's MQTT decryption worked until the exact second of the re-bind (15:00:44 container time), then failed permanently (PKCS7 errors); after re-login the cloud issued a new `p2p_key` (`xdgfZrMLEVuRBTOs4aAi` → `mc6FEc6X79zOzcPhL8GE`) and MQTT healed. **All DSK cipher batteries run on 2026-09-02 used the STALE key** — re-run with the fresh key: still negative (curse/AES × ascii/b64/case/md5 × heartbeats/app-payloads/tokens/137B frames).
+- **Heartbeat is state-dependent**: unbound printer → 25B minimal frames; **bound printer → 137B rich status frames** every 3s (matches app-capture post-binding frames). Structure: `[12B hdr][4B nonce][4B counter][4B zeros][80B constant blob][32B varying tail][xor]`. Constant blob stable within a session — encrypted state/config; not opened by DSK-family ciphers.
+- **MQTT status stream confirmed**: `/phone/maker/{sn}/notice` carries printer status every 3s, AES-encrypted with the (rotated on re-bind) mqtt_key; OpenPolyPrint decrypts it fine with a current key — a working local status channel already.
+- **Server-down implication**: keys held at any moment remain valid indefinitely; a factory reset AFTER server loss is unrecoverable (no way to fetch the new DSK). OpenPolyPrint must treat cached keys as critical persistent state.
+- **OTA API verdict (final)**: `/v1/app/ota/get_rom_version` + `T5216_Model` returns `32000` uniformly — even with no check_code, any version, any derivation ⇒ **32000 = request-signature verification failure**. The signed headers (`X-Signature` etc.) are computed in the NATIVE layer (`getV3Headers`/`getAiotHeaders` in Dart are thin `notifyNative` wrappers — disassembled and confirmed). Token is short-lived (401 after ~minutes). The app-API road ends at the Ijiami dex, same as the BLE crypto.
+- Remaining viable routes: (1) rooted Android + BlackDex → dump dex → extract BOTH the BLE KDF and the header signer; (2) MQTT-observed OTA push (requires an actual update event); (3) printer firmware via other physical means (flash dump); (4) **MITM proxy on non-rooted phone** — see §15.
+
+---
+
+## 15. Tuya KDF comparison & MITM proxy avenue (2026-09-03)
+
+### 15a. Tuya BLE SDK KDF comparison — NEGATIVE
+
+Tested Tuya-style KDF patterns against the device-constant pre-handshake token (`9c46cc9dff7c323a1259c0bdc6fcd236`). Script: `tools/ble_probe/tuya_kdf_test.py`.
+
+**Tuya BLE session key derivation** (from ESP-TuyaBLE source code):
+```
+session_key = MD5(local_key[:6] + srand[:6])   // srand = 6B nonce from device info response
+```
+Security flags: 0x04 = MD5(local_key[:6]), 0x05 = session_key, 0x06 = no key.
+
+**Tuya LAN v3.4 session key**:
+```
+session_key = AES_ECB_128(XOR_bytes(client_random, gw_random), local_key)
+```
+
+**89 candidates tested** against the device-constant token, using DSK (old+new, ascii+base64 forms), SN, MAC, DUID in all combinations of MD5/SHA1/SHA256/AES-ECB:
+- `MD5(dsk + sn)`, `MD5(sn + dsk)`, `MD5(dsk + mac)`, `MD5(mac + dsk)` — all forms
+- `MD5(dsk[:6] + sn[:6])` — Tuya BLE style with DSK as "local key"
+- `SHA256(dsk)[:16]`, `SHA256(sn+mac)[:16]` — truncated hashes
+- `AES_ECB(dsk, zeros/sn/mac)` — Tuya LAN style
+- `AES_ECB_decrypt(dsk, token)` — reverse lookup (all produced garbage)
+- SN/MAC/DUID alone and combined
+
+**Result: ZERO matches.** The device-constant token is NOT derivable from DSK, SN, MAC, or DUID using any standard pattern. This confirms the KDF uses a **device-internal factory key** that lives only in the junzheng module's flash — not in any cloud-provided credential.
+
+**Conclusion**: The Tuya crypto family is related (ECDH + AES-ECB) but the AnkerMake KDF uses an additional secret not available outside the device. Tuya's SDK assumes the `local_key` is provisioned at factory time and known to both sides — AnkerMake's equivalent is a factory-internal key never exposed via cloud APIs.
+
+### 15b. MITM proxy on non-rooted phone — NEW ROUTE (no root needed)
+
+**Insight**: We don't need to crack the Ijiami-signed headers to get the OTA firmware. We just need to **capture** them from a live app session.
+
+**Setup (no root required)**:
+1. Install mitmproxy (or Proxyman/Charles) on the PC
+2. Install the proxy's CA certificate on the phone (Settings → Security → Install certificate)
+3. Configure the phone's WiFi proxy to point at the PC
+4. Open the EufyMake app → Settings → Firmware → Check for Update
+
+**What we capture**:
+- The full OTA API request including signed headers (`X-Signature`, `X-Key-Ident`, `X-Request-Ts`, `X-Request-Once`, `X-Encoding`)
+- The OTA API response — if an update is available, this contains the **firmware download URL** (CDN link, likely unsigned)
+- Even if no update is available, the response tells us the current firmware version and may contain CDN URLs for the current firmware
+
+**Why this works**:
+- The signed headers are generated by the native Ijiami layer, but we don't need to understand them — we just capture and replay them
+- The token is short-lived (~minutes), but we can immediately use it to fetch the firmware
+- The CDN hosting the firmware binary likely doesn't require authentication — just the URL
+- Even if the CDN requires auth, we capture the auth from the same session
+
+**What we get**: the OTA firmware package → extract the junzheng BLE module binary → static ARM RE → the session KDF (no Ijiami obfuscation on the junzheng firmware, per §13).
+
+**Risk**: Ijiami may implement certificate pinning. If so, the app will refuse to connect through the proxy. Bypass options:
+- `frida-gadget` patched APK (objection patchapk) to disable pinning — works on non-rooted phones
+- Or: use a VPN-based MITM (like PCAPdroid) that captures raw traffic without proxy settings — won't decrypt TLS but may reveal the CDN hostname, which we can then try to access directly
+
+**If no update is available**: The OTA API still returns the current version info. More importantly, the **CDN URL pattern** may be predictable (e.g. `https://cdn.ankermake.com/ota/T5216/V3.1.56/firmware.bin`). Once we see the URL structure from any response, we can try other version numbers.
+
+### 15c. Option 5 (MQTT OTA observation) — REVISED ASSESSMENT
+
+**Original idea**: Watch MQTT for OTA push notifications.
+**Problem**: The OTA check is app→cloud (HTTPS), not over MQTT. The printer doesn't initiate OTA checks. Without Anker actively pushing an update, there's nothing to observe on MQTT.
+**Verdict**: Dead unless Anker pushes an OTA update to this specific printer. The MITM proxy approach (§15b) is strictly better — it works on demand, doesn't require waiting for an update push, and captures the signed headers directly.
+
+## 13. Firmware / OTA avenue (2026-09-03 online sweep)
+
+- **Marlin GPL source** (github.com/eufymake/eufyMake-Marlin, cloned): NO BLE code — `queue.cpp:672` ("only response uart1 from junzheng") confirms the BLE+WiFi stack lives on the **junzheng companion module** (V8110), fed to Marlin over UART1. The junzheng firmware ships in **OTA packages** — plain binaries, no Ijiami.
+- **Tuya SDK** (hjytry/tuya-ble-sdk): crypto family public (ECDH/session-key modes in compiled libs) but M5C GATT/framing is Anker-custom.
+- **Anker OTA API**: `POST https://make-app-eu.ankermake.com/v1/app/ota/get_rom_version` (EU region; token in `/data/ankerctl/default.json`), body `{sn, check_code, device_type, current_version_name}`.
+  - **device_type for M5C = `T5216_Model`** (20008→32000 progress vs other values)
+  - check_code = `md5(duid + "+" + duid[-4:] + "+" + mac)` (duid `EUPRAKM-012822-SMKXB`, wifi mac `E8EECC9FE857`) → but 32000 persists across check_code variants ⇒ **gated on app-signed headers**
+  - Required headers (from APK pool): `X-Key-Ident`, `X-Request-Ts`, `X-Request-Once`, `X-Signature`, `X-Encoding`, (+ `app_version`, `timezone`, `platform`, `language`). Signing algorithm is in Dart: `getV3Headers` @0x15799ac, `getAiotHeaders` @0x10b452c — extractable with the same capstone+pool pipeline used for §2.
+- **Zero-code alternative**: OpenPolyPrint's MQTT client (decrypts with stored mqtt_key, subscribes `/phone/maker/{sn}/notice|command/reply|query/reply`) may observe the OTA notify when the app checks firmware — watch `docker logs -f openpolyprint` during an app firmware-check.
+- Firmware package goal: extract junzheng BLE firmware binary → static ARM RE → the session KDF (no obfuscation expected).
 
 ## Notes
 

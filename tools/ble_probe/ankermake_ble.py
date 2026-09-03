@@ -154,6 +154,74 @@ async def cmd_enum(args: argparse.Namespace) -> None:
     await client.disconnect()
 
 
+# --------------------------------------------------------------- probe -----
+
+# Built-in probe sequence for framing discovery (findings §2g/§2b).
+PROBE_FRAMES = [
+    ("replay-heartbeat", bytes.fromhex("4d4119000501010546c001008462cc2fbb0900000000000025")),
+    ("minimal-set_factory", bytes.fromhex("4d410900050101054b4e")),
+    ("full-set_factory", bytes.fromhex("4d411900050101054bc0010000000000000000000000009f")),
+    ("full-wifi_list", bytes.fromhex("4d4119000501010542c0010000000000000000000000008d")),
+    ("raw-4b", bytes.fromhex("4b")),
+    ("raw-02-4b-00", bytes.fromhex("024b00")),
+]
+
+
+def xor8(data: bytes) -> int:
+    x = 0
+    for b in data:
+        x ^= b
+    return x
+
+
+def build_frame(cmd: int, payload: bytes = b"", flags: bytes = b"\xc0\x01\x00") -> bytes:
+    """Build an MA frame: magic + len + 05010105 + cmd + flags + payload + pad + xor8."""
+    body = b"\x4d\x41" + (0).to_bytes(2, "little") + b"\x05\x01\x01\x05" + bytes([cmd]) + flags + payload
+    body = body[:2] + len(body).to_bytes(2, "little") + body[4:]
+    return body + bytes([xor8(body)])
+
+
+async def cmd_probe(args: argparse.Namespace) -> None:
+    log_path = Path(args.log)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_lines: list[str] = []
+
+    def log(msg: str) -> None:
+        print(msg)
+        log_lines.append(msg)
+
+    def on_notify(c: BleakGATTCharacteristic, data: bytearray) -> None:
+        try:
+            note = decode_guess(bytes(data))
+        except Exception:  # noqa: BLE001
+            note = ""
+        log(f"[{ts()}] NOTIFY ({len(data)}B): {hx(data)}" + (f"  |  {note}" if note else ""))
+
+    frames = [(n, bytes.fromhex(h)) for n, h in args.frames] if args.frames else PROBE_FRAMES
+    gap = args.gap
+
+    async with BleakClient(args.address) as client:
+        log(f"[+] Connected {args.address}, MTU {client.mtu_size}")
+        chars = [c for s in client.services for c in s.characteristics]
+        write_chars = [c for c in chars if "write" in char_props(c)]
+        target = write_chars[0] if write_chars else None
+        if not target:
+            sys.exit("[!] no writable characteristic")
+        for c in chars:
+            if "notify" in char_props(c) or "indicate" in char_props(c):
+                await client.start_notify(c, on_notify)
+        log(f"[*] write target {target.uuid}; listening {args.baseline}s for baseline heartbeat...")
+        await asyncio.sleep(args.baseline)
+
+        for name, frame in frames:
+            log(f"\n=== PROBE {name}: {hx(frame)}  (xor8={'ok' if xor8(frame[:-1]) == frame[-1] else 'n/a'})")
+            await client.write_gatt_char(target, frame, response=False)
+            await asyncio.sleep(gap)
+
+        log(f"\n[*] done; log saved to {log_path}")
+    log_path.write_text("\n".join(log_lines) + "\n")
+
+
 # ------------------------------------------------------------- monitor -----
 
 TLV_RE = re.compile(rb"(?:( [\xa0-\xaf]) )", re.VERBOSE)
@@ -175,7 +243,7 @@ def decode_guess(data: bytes) -> str:
     txt = printable(data)
     if len(txt) >= 4:
         notes.append(f'ascii: "{txt}"')
-    known = [f"cmd=0x{b:02x}({name})" for name, code in COMMANDS.items() if code in data]
+    known = [f"cmd=0x{code:02x}({name})" for name, code in COMMANDS.items() if code in data]
     if known:
         notes.append("cmds-seen: " + ", ".join(known))
     return "  |  ".join(notes)
@@ -185,7 +253,10 @@ async def cmd_monitor(args: argparse.Namespace) -> None:
     char_filter = [u.lower() for u in args.chars.split(",")] if args.chars else None
 
     def on_notify(c: BleakGATTCharacteristic, data: bytearray) -> None:
-        note = decode_guess(bytes(data))
+        try:
+            note = decode_guess(bytes(data))
+        except Exception as e:  # noqa: BLE001 - never lose a packet to a decoder bug
+            note = f"(decode error: {e})"
         print(f"[{ts()}] NOTIFY {c.uuid} ({len(data)}B): {hx(data)}" + (f"  {note}" if note else ""))
 
     async with BleakClient(args.address) as client:
@@ -298,6 +369,14 @@ def main() -> None:
     pm.add_argument("--send", default="", help="one-shot: '<uuid|handle>:<hex>' then wait")
     pm.add_argument("--wait", type=float, default=5.0, help="seconds to listen in --send mode (default 5)")
     pm.set_defaults(fn=cmd_monitor)
+
+    pp = sub.add_parser("probe", help="non-interactive: send built-in framing probes, log all notifications")
+    pp.add_argument("address")
+    pp.add_argument("--baseline", type=float, default=6.0, help="seconds to observe heartbeat before probing")
+    pp.add_argument("--gap", type=float, default=6.0, help="seconds between probes (default 6, > heartbeat period)")
+    pp.add_argument("--frames", default="", help="custom probes as 'name:hex,name:hex,...' (else built-in set)")
+    pp.add_argument("--log", default=str(Path(__file__).parent / "captures" / "probe_session.log"))
+    pp.set_defaults(fn=cmd_probe)
 
     args = p.parse_args()
     try:
