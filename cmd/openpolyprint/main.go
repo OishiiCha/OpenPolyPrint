@@ -34,6 +34,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/klipper"
 	"github.com/lucas/openpolyprint/internal/logstore"
 	"github.com/lucas/openpolyprint/internal/maintenance"
+	"github.com/lucas/openpolyprint/internal/orcabridge"
 	"github.com/lucas/openpolyprint/internal/pi"
 	"github.com/lucas/openpolyprint/internal/printers"
 	"github.com/lucas/openpolyprint/internal/printsession"
@@ -46,6 +47,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/stlfiles"
 	"github.com/lucas/openpolyprint/internal/tempstore"
 	"github.com/lucas/openpolyprint/internal/tlsautocert"
+	orcaembed "github.com/lucas/openpolyprint/orcaslicer-plugin"
 )
 
 type headerTransport struct {
@@ -536,6 +538,10 @@ func main() {
 	if err != nil {
 		log.Printf("profile files store: %v", err)
 	}
+	orcaBridgeStore, err := orcabridge.NewStore(filepath.Join(settingsDir, "orcabridge"))
+	if err != nil {
+		log.Fatalf("orca bridge store: %v", err)
+	}
 	stlFilesDir := filepath.Join(settingsDir, "stlfiles")
 	stlFilesStore, err := stlfiles.NewStore(stlFilesDir)
 	if err != nil {
@@ -856,6 +862,360 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(metas)
+	})
+
+	// ─── OrcaSlicer Bridge API ──────────────────────────────────────────────
+	// The OpenPolyPrint Bridge OrcaSlicer plugin pushes heartbeats and
+	// artifacts (sliced G-code, preset bundles, settings snapshots) here.
+	// The UI scans them and can run a Gemini review (key required).
+
+	// GET /api/orca/plugin — serves the bridge plugin script so it can be
+	// installed on the (usually separate) machine running OrcaSlicer.
+	mux.HandleFunc("/api/orca/plugin", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/x-python; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="plugin.py"`)
+		w.Header().Set("X-Plugin-Folder", orcaembed.PluginFolder)
+		w.Header().Set("X-Plugin-Version", orcaembed.PluginVersion)
+		_, _ = w.Write([]byte(orcaembed.PluginScript))
+	})
+
+	// GET /api/orca/install/{platform} — generated installer scripts that
+	// download the plugin from this server directly into OrcaSlicer's
+	// plugin directory on the slicer machine. "windows" serves a .bat,
+	// "mac" and "linux" serve a POSIX .sh. The server address from the
+	// request is baked in so the script needs no configuration.
+	mux.HandleFunc("/api/orca/install/{platform}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		host := r.Host
+		if host == "" {
+			host = "localhost"
+		}
+		// Always bake the plain-HTTP origin: port 80 is always listening,
+		// and the OrcaSlicer machine won't trust the self-signed TLS CA
+		// by default.
+		base := "http://" + host
+		pluginURL := base + "/api/orca/plugin"
+
+		var script, filename, contentType string
+		switch r.PathValue("platform") {
+		case "windows":
+			lines := []string{
+				"@echo off",
+				"setlocal",
+				`set "DEST=%APPDATA%\OrcaSlicer\orca_plugins\` + orcaembed.PluginFolder + `"`,
+				`set "URL=` + pluginURL + `"`,
+				"echo Installing OpenPolyPrint Bridge for OrcaSlicer...",
+				`if not exist "%DEST%" mkdir "%DEST%"`,
+				`curl -fsSL -o "%DEST%\plugin.py" "%URL%"`,
+				`if not exist "%DEST%\plugin.py" (`,
+				`  powershell -NoProfile -Command "Invoke-WebRequest -UseBasicParsing -Uri '%URL%' -OutFile '%DEST%\plugin.py'"`,
+				")",
+				`if exist "%DEST%\plugin.py" (`,
+				"  echo.",
+				`  echo Installed: %DEST%\plugin.py`,
+				"  echo.",
+				"  echo Next steps:",
+				"  echo   1. Restart OrcaSlicer",
+				"  echo   2. Open File - Plugins - OpenPolyPrint Bridge",
+				`  echo   3. Set the server URL to: ` + base,
+				`  echo   4. Run "Sync Now" to test the connection`,
+				"  echo.",
+				") else (",
+				`  echo Failed to download the plugin from ` + pluginURL,
+				")",
+				"pause",
+			}
+			script = strings.Join(lines, "\r\n") + "\r\n"
+			filename = "install-orca-bridge.bat"
+			contentType = "application/octet-stream"
+		case "mac", "linux":
+			script = `#!/bin/sh
+# Installs the OpenPolyPrint Bridge plugin for OrcaSlicer.
+set -e
+URL="` + pluginURL + `"
+SERVER="` + base + `"
+if [ "$(uname)" = "Darwin" ]; then
+  DEST="$HOME/Library/Application Support/OrcaSlicer/orca_plugins/` + orcaembed.PluginFolder + `"
+else
+  DEST="${XDG_CONFIG_HOME:-$HOME/.config}/OrcaSlicer/orca_plugins/` + orcaembed.PluginFolder + `"
+fi
+mkdir -p "$DEST"
+echo "Installing OpenPolyPrint Bridge for OrcaSlicer..."
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL -o "$DEST/plugin.py" "$URL"
+else
+  wget -qO "$DEST/plugin.py" "$URL"
+fi
+echo "Installed: $DEST/plugin.py"
+echo
+echo "Next steps:"
+echo "  1. Restart OrcaSlicer"
+echo "  2. Open File > Plugins > OpenPolyPrint Bridge"
+echo "  3. Set the server URL to: $SERVER"
+echo "  4. Run 'Sync Now' to test the connection"
+`
+			filename = "install-orca-bridge.sh"
+			contentType = "application/octet-stream"
+		default:
+			http.Error(w, `{"error":"unknown platform (use windows, mac, or linux)"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		_, _ = w.Write([]byte(script))
+	})
+
+	// POST /api/orca/announce — heartbeat from the plugin. Returns whether
+	// the AI review is available so the plugin can surface it.
+	mux.HandleFunc("/api/orca/announce", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			InstanceID    string   `json:"instanceId"`
+			Hostname      string   `json:"hostname"`
+			Platform      string   `json:"platform"`
+			OrcaVersion   string   `json:"orcaVersion"`
+			PluginVersion string   `json:"pluginVersion"`
+			Capabilities  []string `json:"capabilities"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if req.InstanceID == "" {
+			http.Error(w, `{"error":"instanceId required"}`, http.StatusBadRequest)
+			return
+		}
+		inst := orcabridge.Instance{
+			InstanceID:    req.InstanceID,
+			Hostname:      req.Hostname,
+			Platform:      req.Platform,
+			OrcaVersion:   req.OrcaVersion,
+			PluginVersion: req.PluginVersion,
+			Capabilities:  req.Capabilities,
+		}
+		stored := orcaBridgeStore.Announce(inst)
+		log.Printf("[orca-bridge] announce from %s (%s) — ai %s", stored.Hostname, stored.InstanceID, map[bool]string{true: "enabled", false: "disabled"}[resolveAPIKey(settingsFile) != ""])
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":        true,
+			"instance":  stored,
+			"aiEnabled": resolveAPIKey(settingsFile) != "",
+		})
+	})
+
+	// GET /api/orca/instances — slicer instances known to the bridge.
+	mux.HandleFunc("/api/orca/instances", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"instances": orcaBridgeStore.ListInstances(),
+			"aiEnabled": resolveAPIKey(settingsFile) != "",
+		})
+	})
+
+	// GET /api/orca/artifacts — list synced artifacts (?type=gcode|presets|settings).
+	// POST /api/orca/artifacts — upload from the plugin. Multipart (G-code
+	// file + metadata fields) or JSON (presets/settings snapshot).
+	mux.HandleFunc("/api/orca/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"artifacts": orcaBridgeStore.ListArtifacts(r.URL.Query().Get("type"))})
+		case http.MethodPost:
+			contentType := r.Header.Get("Content-Type")
+			var artifact orcabridge.Artifact
+			var content []byte
+			if strings.HasPrefix(contentType, "multipart/form-data") {
+				if err := r.ParseMultipartForm(500 << 20); err != nil {
+					http.Error(w, `{"error":"failed to parse multipart form"}`, http.StatusBadRequest)
+					return
+				}
+				file, header, err := r.FormFile("file")
+				if err != nil {
+					http.Error(w, `{"error":"no file in form"}`, http.StatusBadRequest)
+					return
+				}
+				content, err = io.ReadAll(file)
+				_ = file.Close()
+				if err != nil {
+					http.Error(w, `{"error":"failed to read file"}`, http.StatusBadRequest)
+					return
+				}
+				artifact = orcabridge.Artifact{
+					InstanceID:   r.FormValue("instanceId"),
+					InstanceHost: r.FormValue("hostname"),
+					Type:         r.FormValue("type"),
+					Name:         r.FormValue("name"),
+					Filename:     header.Filename,
+				}
+				if artifact.Type == "" {
+					artifact.Type = orcabridge.ArtifactGCode
+				}
+			} else {
+				var req struct {
+					InstanceID string            `json:"instanceId"`
+					Hostname   string            `json:"hostname"`
+					Type       string            `json:"type"`
+					Name       string            `json:"name"`
+					Settings   map[string]string `json:"settings"`
+					Presets    json.RawMessage   `json:"presets"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+					return
+				}
+				artifact = orcabridge.Artifact{
+					InstanceID:   req.InstanceID,
+					InstanceHost: req.Hostname,
+					Type:         req.Type,
+					Name:         req.Name,
+					Settings:     req.Settings,
+				}
+				if len(req.Presets) > 0 {
+					content = req.Presets
+					if artifact.Type == "" {
+						artifact.Type = orcabridge.ArtifactPresets
+					}
+				} else if artifact.Type == "" {
+					artifact.Type = orcabridge.ArtifactSettings
+				}
+			}
+			if artifact.InstanceID == "" {
+				http.Error(w, `{"error":"instanceId required"}`, http.StatusBadRequest)
+				return
+			}
+			if artifact.Name == "" {
+				artifact.Name = time.Now().Format("sync-2006-01-02-150405")
+			}
+			saved, err := orcaBridgeStore.AddArtifact(&artifact, content)
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+				return
+			}
+			log.Printf("[orca-bridge] stored %s artifact %q from %s (%d settings)", saved.Type, saved.Name, saved.InstanceHost, len(saved.Settings))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(saved)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	// GET/DELETE /api/orca/artifacts/{id} — artifact detail / delete.
+	mux.HandleFunc("/api/orca/artifacts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch r.Method {
+		case http.MethodGet:
+			artifact, err := orcaBridgeStore.GetArtifact(id)
+			if err != nil {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(artifact)
+		case http.MethodDelete:
+			if !orcaBridgeStore.Remove(id) {
+				http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		}
+	})
+
+	// GET /api/orca/artifacts/{id}/content — download the raw payload.
+	mux.HandleFunc("/api/orca/artifacts/{id}/content", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		data, name, err := orcaBridgeStore.Content(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write(data)
+	})
+
+	// POST /api/orca/artifacts/{id}/analyze — Gemini review of the
+	// artifact's G-code/settings/presets. Requires a Gemini API key
+	// (Settings or GEMINI_API_KEY env var).
+	mux.HandleFunc("/api/orca/artifacts/{id}/analyze", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			APIKey       string `json:"apiKey"`
+			CustomPrompt string `json:"customPrompt"`
+		}
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+
+		// Resolve API key: request > settings.json > env. The AI check only
+		// works when a Gemini key is configured on this server.
+		apiKey := req.APIKey
+		if apiKey == "" {
+			apiKey = resolveAPIKey(settingsFile)
+		}
+		if apiKey == "" {
+			http.Error(w, `{"error":"no Gemini API key configured. Set one in Settings or via GEMINI_API_KEY env var."}`, http.StatusBadRequest)
+			return
+		}
+
+		artifact, err := orcaBridgeStore.GetArtifact(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+
+		reviewReq := ai.SlicerReviewRequest{
+			APIKey:       apiKey,
+			ArtifactType: artifact.Type,
+			Name:         artifact.Name,
+			InstanceHost: artifact.InstanceHost,
+			Settings:     artifact.Settings,
+			CustomPrompt: req.CustomPrompt,
+		}
+		if artifact.Type == orcabridge.ArtifactGCode {
+			if path := orcaBridgeStore.PayloadPath(artifact.ID); path != "" {
+				reviewReq.GCodeExcerpt = orcabridge.Excerpt(path, 120, 60)
+			}
+			reviewReq.GCodeLines = artifact.GCodeLines
+		}
+		if len(artifact.Presets) > 0 {
+			reviewReq.PresetsJSON = string(artifact.Presets)
+		}
+
+		result, err := ai.ReviewSlicerArtifact(reviewReq)
+		if err != nil {
+			log.Printf("[orca-bridge] ai review failed: %v", err)
+			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		orcaBridgeStore.SaveAnalysis(artifact.ID, result.Text)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"analysis":   result.Text,
+			"analyzedAt": time.Now().Unix(),
+		})
 	})
 
 	// AI analysis — analyze a timelapse frame with G-code + temp context using Gemini

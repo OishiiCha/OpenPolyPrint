@@ -29,6 +29,7 @@ import {
   FolderClosed,
   Activity,
   Server,
+  Cable,
 } from 'lucide-react'
 import { loadConfig, saveConfig } from '../config'
 import { AIChatPane } from './AIChatSidebar'
@@ -70,6 +71,7 @@ const navItems: NavEntry[] = [
       { to: '/gcode', label: 'G-code', icon: FileCode2 },
       { to: '/profile-files', label: 'Profile Files', icon: Files },
       { to: '/stl-files', label: 'STL Library', icon: Box },
+      { to: '/slicer-bridge', label: 'Slicer Bridge', icon: Cable },
     ],
   },
   {

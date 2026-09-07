@@ -11,6 +11,7 @@ Multi-vendor 3D printer control built from the AnkerMake M5/M5C protocol stack. 
 - **Auto Record** — automatically start recording when a print begins, with video or timelapse mode.
 - **Print History** — tracks finished prints and results.
 - **G-code** — upload and manage G-code files.
+- **Slicer Bridge** — scan G-code, presets, and settings synced from the [OrcaSlicer plugin](orcaslicer-plugin/), with optional Gemini-powered AI review.
 - **Terminal** — full log viewer and a color-coded mini terminal in the sidebar.
 - **Settings** — integrations, Pi GPIO, provider accounts, and app preferences.
 - **Offline keys export** — export printer P2P/MQTT keys for manual offline setup.

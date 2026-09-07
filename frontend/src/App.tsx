@@ -26,6 +26,7 @@ import { Maintenance } from './pages/Maintenance'
 import { Planning } from './pages/Planning'
 import { ProfileFiles } from './pages/ProfileFiles'
 import { STLFiles } from './pages/STLFiles'
+import { SlicerBridge } from './pages/SlicerBridge'
 import { Login } from './pages/Login'
 import { BackgroundStreams } from './components/BackgroundStreams'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -93,6 +94,7 @@ function App() {
             <Route path="planning" element={<Planning />} />
             <Route path="profile-files" element={<ProfileFiles />} />
             <Route path="stl-files" element={<STLFiles />} />
+            <Route path="slicer-bridge" element={<SlicerBridge />} />
             <Route path="plugs" element={<SmartPlugs />} />
             <Route path="analysis" element={<PrintAnalysis />} />
             <Route path="analytics" element={<Analytics />} />

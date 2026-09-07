@@ -129,6 +129,7 @@ var publicPaths = map[string]bool{
 	"/logo.svg":            true,
 	"/api/tls/ca":          true,
 	"/api/tls/install/":    true,
+	"/api/orca/plugin":     true, // plugin download (OrcaSlicer runs on other devices)
 }
 
 // isPublicPath checks if a path should be exempt from authentication.
@@ -150,6 +151,11 @@ func isPublicPath(path string) bool {
 	}
 	// Allow TLS install script paths
 	if strings.HasPrefix(path, "/api/tls/install/") {
+		return true
+	}
+	// OrcaSlicer bridge installer scripts run on the slicer machine and need
+	// to be downloadable without a session.
+	if strings.HasPrefix(path, "/api/orca/install/") {
 		return true
 	}
 	return false
