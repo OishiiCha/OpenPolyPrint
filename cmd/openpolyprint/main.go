@@ -28,6 +28,7 @@ import (
 	"github.com/lucas/openpolyprint/internal/cameras"
 	"github.com/lucas/openpolyprint/internal/envconfig"
 	"github.com/lucas/openpolyprint/internal/filament"
+	"github.com/lucas/openpolyprint/internal/flashforge"
 	"github.com/lucas/openpolyprint/internal/gcode"
 	"github.com/lucas/openpolyprint/internal/history"
 	"github.com/lucas/openpolyprint/internal/integrations"
@@ -123,6 +124,8 @@ func buildManager(cfg *config.Config) *printers.Manager {
 		switch p.Type {
 		case "klipper":
 			drivers = append(drivers, klipper.NewDriver(p))
+		case "flashforge":
+			drivers = append(drivers, flashforge.NewDriver(p))
 		default:
 			drivers = append(drivers, printers.NewStaticDriver(p))
 		}
@@ -186,30 +189,142 @@ func safeName(s string) string {
 	return s
 }
 
+// transferInfo is the live state of a G-code transfer to a printer, exposed
+// so the UI can show a transfer percentage like eufyMake Studio does.
+type transferInfo struct {
+	PrinterID string `json:"printerId"`
+	Filename  string `json:"filename"`
+	Phase     string `json:"phase"` // connecting | uploading | starting | done | error
+	Sent      int64  `json:"sent"`
+	Total     int64  `json:"total"`
+	Percent   int    `json:"percent"`
+	Error     string `json:"error,omitempty"`
+	StartedAt int64  `json:"startedAt"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// activeTransferPhases are the phases during which a transfer is still in
+// flight (done/error are terminal and kept around for late pollers).
+func transferActive(phase string) bool {
+	switch phase {
+	case "connecting", "uploading", "starting":
+		return true
+	}
+	return false
+}
+
+// transferTracker holds the latest transfer state per printer in memory.
+type transferTracker struct {
+	mu    sync.Mutex
+	items map[string]*transferInfo
+}
+
+func newTransferTracker() *transferTracker {
+	return &transferTracker{items: make(map[string]*transferInfo)}
+}
+
+func (t *transferTracker) start(printerID, filename string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.items[printerID] = &transferInfo{
+		PrinterID: printerID,
+		Filename:  filename,
+		Phase:     "connecting",
+		StartedAt: time.Now().Unix(),
+		UpdatedAt: time.Now().Unix(),
+	}
+}
+
+func (t *transferTracker) progress(printerID string, sent, total int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info, ok := t.items[printerID]
+	if !ok {
+		return
+	}
+	info.Phase = "uploading"
+	info.Sent = int64(sent)
+	info.Total = int64(total)
+	if total > 0 {
+		info.Percent = sent * 100 / total
+	}
+	info.UpdatedAt = time.Now().Unix()
+}
+
+func (t *transferTracker) phase(printerID, phase string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info, ok := t.items[printerID]
+	if !ok {
+		return
+	}
+	info.Phase = phase
+	info.UpdatedAt = time.Now().Unix()
+}
+
+func (t *transferTracker) finish(printerID, phase, errMsg string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info, ok := t.items[printerID]
+	if !ok {
+		return
+	}
+	info.Phase = phase
+	if phase == "done" && info.Total > 0 {
+		info.Sent = info.Total
+		info.Percent = 100
+	}
+	info.Error = errMsg
+	info.UpdatedAt = time.Now().Unix()
+}
+
+func (t *transferTracker) get(printerID string) (transferInfo, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info, ok := t.items[printerID]
+	if !ok {
+		return transferInfo{}, false
+	}
+	return *info, true
+}
+
+// busy reports whether a transfer is currently in flight for the printer.
+func (t *transferTracker) busy(printerID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info, ok := t.items[printerID]
+	return ok && transferActive(info.Phase)
+}
+
 // uploadAndPrint uploads a G-code file to the printer and then starts
 // printing it. The gcodeStore is used to load the file data from disk.
 // The filename is the G-code file's name (used as the on-printer filename).
-func uploadAndPrint(ctx context.Context, d printers.Driver, store *gcode.Store, filename string) error {
-	log.Printf("[print] starting upload of %s (%d bytes)", filename, 0)
-	// Load the G-code data from the store
+// Transfer progress is reported through the tracker so the UI can show a
+// percentage while the (potentially minutes-long) upload runs.
+func uploadAndPrint(ctx context.Context, tracker *transferTracker, printerID string, d printers.Driver, store *gcode.Store, filename string) error {
 	data, err := store.Load(filename)
 	if err != nil {
 		log.Printf("[print] failed to load gcode %s: %v", filename, err)
 		return fmt.Errorf("load gcode %s: %w", filename, err)
 	}
 	log.Printf("[print] loaded %s (%d bytes), uploading to printer...", filename, len(data))
-	// Upload to the printer first
-	if err := d.UploadGCode(ctx, filename, data); err != nil {
+	tracker.start(printerID, filename)
+	if err := d.UploadGCode(ctx, filename, data, func(sent, total int) {
+		tracker.progress(printerID, sent, total)
+	}); err != nil {
 		log.Printf("[print] upload failed for %s: %v", filename, err)
+		tracker.finish(printerID, "error", err.Error())
 		return fmt.Errorf("upload gcode: %w", err)
 	}
 	log.Printf("[print] upload complete, starting print of %s...", filename)
-	// Now start the print
+	tracker.phase(printerID, "starting")
 	if err := d.StartPrint(ctx, filename); err != nil {
 		log.Printf("[print] start failed for %s: %v", filename, err)
+		tracker.finish(printerID, "error", err.Error())
 		return fmt.Errorf("start print: %w", err)
 	}
 	log.Printf("[print] started %s successfully", filename)
+	tracker.finish(printerID, "done", "")
 	return nil
 }
 
@@ -274,7 +389,7 @@ func stopAutoRecord(cameraMgr *cameras.Manager, printerID string, auto map[strin
 }
 
 // trackHistory watches printer statuses, records finished prints, and triggers auto-recording.
-func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager, sessMgr *printsession.Manager, gcodeStore *gcode.Store) {
+func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], cameraMgr *cameras.Manager, store *history.Store, settingsFile string, intgMgr *integrations.Manager, tempStore *tempstore.Store, queueStore *queue.Store, plugMgr *smartplug.Manager, pushMgr *push.Manager, sessMgr *printsession.Manager, gcodeStore *gcode.Store, tracker *transferTracker) {
 	last := map[string]printers.Status{}
 	started := map[string]time.Time{}
 	autoRecordings := map[string]bool{}
@@ -366,11 +481,23 @@ func trackHistory(ctx context.Context, mgr *atomic.Pointer[printers.Manager], ca
 						if next := queueStore.NextPending(s.ID); next != nil {
 							queueStore.UpdateStatus(next.ID, "printing", "")
 							if d := m.Find(s.ID); d != nil {
-								if err := uploadAndPrint(ctx, d, gcodeStore, next.Filename); err != nil {
-									log.Printf("[queue] auto-start %s on %s failed: %v", next.Filename, s.Name, err)
-									queueStore.UpdateStatus(next.ID, "failed", err.Error())
+								if tracker.busy(s.ID) {
+									log.Printf("[queue] auto-start skipped for %s: transfer already in progress", s.Name)
+									queueStore.UpdateStatus(next.ID, "pending", "")
 								} else {
-									log.Printf("[queue] auto-started %s on %s", next.Filename, s.Name)
+									// Run in the background so this 5s polling
+									// loop keeps tracking status during the upload.
+									itemID, printerID, filename := next.ID, s.ID, next.Filename
+									go func() {
+										jobCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+										defer cancel()
+										if err := uploadAndPrint(jobCtx, tracker, printerID, d, gcodeStore, filename); err != nil {
+											log.Printf("[queue] auto-start %s on %s failed: %v", filename, s.Name, err)
+											queueStore.UpdateStatus(itemID, "failed", err.Error())
+										} else {
+											log.Printf("[queue] auto-started %s on %s", filename, s.Name)
+										}
+									}()
 								}
 							}
 						}
@@ -531,6 +658,7 @@ func main() {
 	historyStore := history.NewStore(settingsDir)
 	tempStore := tempstore.New(600)
 	queueStore := queue.NewStore(settingsDir)
+	transferTracker := newTransferTracker()
 	filamentStore := filament.NewStore(settingsDir)
 	profileStore := profiles.NewStore(settingsDir)
 	profileFilesDir := filepath.Join(settingsDir, "profilefiles")
@@ -795,6 +923,35 @@ func main() {
 			}
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write(data)
+		case http.MethodPatch:
+			// Update file metadata: rename and/or printer assignment
+			var req struct {
+				Name      string  `json:"name"`
+				PrinterID *string `json:"printerId"` // pointer: absent = unchanged, "" = unassign
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+				return
+			}
+			updated := gcode.File{ID: id, Name: id}
+			if req.Name != "" {
+				renamed, err := gcodeStore.Rename(id, req.Name)
+				if err != nil {
+					http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadRequest)
+					return
+				}
+				updated = renamed
+			}
+			if req.PrinterID != nil {
+				final, err := gcodeStore.SetPrinter(updated.ID, *req.PrinterID)
+				if err != nil {
+					http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+					return
+				}
+				updated = final
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(updated)
 		case http.MethodDelete:
 			if err := gcodeStore.Delete(id); err != nil {
 				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
@@ -804,6 +961,23 @@ func main() {
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
+	})
+
+	// G-code file download — served as an attachment
+	mux.HandleFunc("/api/gcode/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		path := gcodeStore.FilePath(id)
+		if _, err := os.Stat(path); err != nil {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
+		http.ServeFile(w, r, path)
 	})
 
 	// G-code timeline — returns timestamped segments for visualization sync
@@ -1545,9 +1719,10 @@ echo "  4. Run 'Sync Now' to test the connection"
 			return
 		}
 		var req struct {
-			Content     string `json:"content"`
-			ProfileName string `json:"profileName"`
-			ProfileType string `json:"profileType"`
+			Content       string `json:"content"`
+			ProfileName   string `json:"profileName"`
+			ProfileType   string `json:"profileType"`
+			ProfileFormat string `json:"profileFormat"` // "json" for OrcaSlicer/BambuStudio profiles, otherwise INI
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -1570,7 +1745,7 @@ echo "  4. Run 'Sync Now' to test the connection"
 			content = content[:50000] + "\n... (truncated)"
 		}
 
-		suggestions, rawText, err := ai.SuggestProfileEdits(apiKey, content, req.ProfileName, req.ProfileType)
+		suggestions, rawText, err := ai.SuggestProfileEdits(apiKey, content, req.ProfileName, req.ProfileType, req.ProfileFormat)
 		if err != nil {
 			log.Printf("[ai] suggest-profile-edits failed: %v", err)
 			// If we have rawText, return it so the user sees something
@@ -3190,13 +3365,27 @@ echo "  4. Run 'Sync Now' to test the connection"
 			if saveName == "" {
 				saveName = pf.Name + " (Edited)"
 			}
+			// JSON profiles (OrcaSlicer/BambuStudio) keep their .json extension;
+			// INI-style content keeps .ini.
+			isJSON := strings.HasPrefix(strings.TrimSpace(req.Content), "{")
+			ext := ".ini"
+			slicer := pf.Slicer
+			if isJSON {
+				ext = ".json"
+				if slicer == "" {
+					slicer = "orcaslicer"
+				}
+			}
 			category := profilefiles.CategoryPrint
+			if pf.Category == profilefiles.CategoryFilament {
+				category = profilefiles.CategoryFilament
+			}
 			newPF, err := profileFilesStore.Add(
 				saveName,
-				strings.ReplaceAll(saveName, " ", "_")+".ini",
+				strings.ReplaceAll(saveName, " ", "_")+ext,
 				category,
 				[]byte(req.Content),
-				pf.Slicer,
+				slicer,
 				pf.Tags,
 				fmt.Sprintf("Edited from: %s", pf.Name),
 			)
@@ -4257,7 +4446,23 @@ echo "  4. Run 'Sync Now' to test the connection"
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			_ = json.NewEncoder(w).Encode(queueStore.List())
+			// Attach live transfer progress to items being sent right now.
+			type queueItemView struct {
+				queue.QueueItem
+				Transfer *transferInfo `json:"transfer,omitempty"`
+			}
+			items := queueStore.List()
+			views := make([]queueItemView, 0, len(items))
+			for _, item := range items {
+				view := queueItemView{QueueItem: item}
+				if item.Status == "printing" {
+					if info, ok := transferTracker.get(item.PrinterID); ok && transferActive(info.Phase) {
+						view.Transfer = &info
+					}
+				}
+				views = append(views, view)
+			}
+			_ = json.NewEncoder(w).Encode(views)
 		case http.MethodPost:
 			var req struct {
 				PrinterID string `json:"printerId"`
@@ -4313,16 +4518,50 @@ echo "  4. Run 'Sync Now' to test the connection"
 				http.Error(w, `{"error":"printer not found"}`, http.StatusNotFound)
 				return
 			}
-			queueStore.UpdateStatus(id, "printing", "")
-			if err := uploadAndPrint(r.Context(), d, gcodeStore, targetItem.Filename); err != nil {
-				queueStore.UpdateStatus(id, "failed", err.Error())
-				http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
+			if transferTracker.busy(targetItem.PrinterID) {
+				http.Error(w, `{"error":"a G-code transfer to this printer is already in progress"}`, http.StatusConflict)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+			queueStore.UpdateStatus(id, "printing", "")
+			// The upload can take minutes (PPPP transfers at ~32KB chunks with
+			// per-chunk acks), so it runs in the background; the UI follows
+			// progress via GET /api/printers/{id}/transfer and the queue item
+			// flips to failed here if anything goes wrong.
+			itemID, printerID, filename := id, targetItem.PrinterID, targetItem.Filename
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				defer cancel()
+				if err := uploadAndPrint(ctx, transferTracker, printerID, d, gcodeStore, filename); err != nil {
+					queueStore.UpdateStatus(itemID, "failed", err.Error())
+					return
+				}
+				log.Printf("[queue] transfer of %s to %s complete, print starting", filename, printerID)
+			}()
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true, "started": true})
 		default:
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		}
+	})
+
+	// GET /api/printers/{id}/transfer — live G-code transfer state for a
+	// printer (percentage, bytes, phase). Kept after completion so late
+	// pollers see the final done/error state.
+	mux.HandleFunc("/api/printers/{id}/transfer", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		id := r.PathValue("id")
+		info, ok := transferTracker.get(id)
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": false, "transfer": nil})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"active":   transferActive(info.Phase),
+			"transfer": info,
+		})
 	})
 
 	mux.HandleFunc("/api/temps/", func(w http.ResponseWriter, r *http.Request) {
@@ -5013,7 +5252,7 @@ echo "  4. Run 'Sync Now' to test the connection"
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr, sessMgr, gcodeStore)
+	go trackHistory(context.Background(), &mgr, cameraMgr, historyStore, settingsFile, intgMgr, tempStore, queueStore, plugMgr, pushMgr, sessMgr, gcodeStore, transferTracker)
 
 	// Serve the built frontend if dist/ exists next to the binary.
 	dist := findDistDir()

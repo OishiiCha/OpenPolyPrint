@@ -1649,6 +1649,7 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
   const [thumbnail, setThumbnail] = useState<string | null>(null)
   const [showPrintMenu, setShowPrintMenu] = useState(false)
   const [printing, setPrinting] = useState(false)
+  const [transfer, setTransfer] = useState<{ phase: string; percent: number; sent: number; total: number } | null>(null)
 
   useEffect(() => {
     setThumbnail(null)
@@ -1662,6 +1663,7 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
     const printerName = printers.find(p => p.id === printerId)?.name || 'printer'
     setShowPrintMenu(false)
     setPrinting(true)
+    setTransfer(null)
     try {
       // Add to queue and immediately start
       const res = await fetch('/api/queue', {
@@ -1671,15 +1673,52 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
       })
       if (!res.ok) throw new Error('Failed to queue')
       const item = await res.json()
-      // Start it immediately
+      // Start it — the server accepts the job and transfers in the background
       const startRes = await fetch(`/api/queue/${encodeURIComponent(item.id)}`, { method: 'POST' })
       if (!startRes.ok) {
         const d = await startRes.json().catch(() => ({ error: 'Start failed' }))
         throw new Error(d.error || 'Start failed')
       }
+      // Follow the G-code transfer to the printer, showing a percentage
+      // like eufyMake Studio does. Resolves with the final transfer state.
+      const finalInfo = await new Promise<{ phase: string; error?: string } | null>((resolve) => {
+        let misses = 0
+        const poll = setInterval(async () => {
+          try {
+            const r = await fetch(`/api/printers/${encodeURIComponent(printerId)}/transfer`)
+            if (!r.ok) throw new Error(String(r.status))
+            const d = await r.json()
+            if (d.transfer) setTransfer(d.transfer)
+            if (d.active === false && d.transfer) {
+              clearInterval(poll)
+              resolve(d.transfer)
+            } else if (d.active === false) {
+              // No transfer registered yet — give the backend a grace period
+              // before giving up (the upload goroutine may still be starting).
+              if (++misses > 15) {
+                clearInterval(poll)
+                resolve(null)
+              }
+            }
+          } catch {
+            if (++misses > 15) {
+              clearInterval(poll)
+              resolve(null)
+            }
+          }
+        }, 700)
+      })
+      if (finalInfo?.phase === 'error') {
+        throw new Error(finalInfo.error || 'Transfer to printer failed')
+      }
       // Success — dispatch toast event
       window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
-        detail: { type: 'success', message: `Print started: ${file.name} → ${printerName}` }
+        detail: {
+          type: 'success',
+          message: finalInfo
+            ? `Print started: ${file.name} → ${printerName} (transfer complete)`
+            : `Print started: ${file.name} → ${printerName}`
+        }
       }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Print failed'
@@ -1736,6 +1775,33 @@ function FileRow({ file, onDelete, printers }: { file: GCodeFile; onDelete: (id:
             {file.estimatedTime ? ` · ${file.estimatedTime}` : ''}
             {file.filament ? ` · ${file.filament}` : ''}
           </p>
+          {printing && transfer && (
+            <div className="mt-2 w-48 sm:w-64">
+              <div className="mb-1 flex items-center justify-between font-mono text-[10px] text-slate-400">
+                <span>
+                  {transfer.phase === 'connecting'
+                    ? 'Connecting to printer…'
+                    : transfer.phase === 'starting'
+                      ? 'Starting print…'
+                      : transfer.phase === 'error'
+                        ? 'Transfer failed'
+                        : 'Sending G-code…'}
+                </span>
+                <span>{transfer.percent}%</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${transfer.phase === 'error' ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${Math.min(100, transfer.percent)}%` }}
+                />
+              </div>
+              {transfer.total > 0 && (
+                <p className="mt-0.5 font-mono text-[10px] text-slate-500">
+                  {(transfer.sent / 1048576).toFixed(1)} / {(transfer.total / 1048576).toFixed(1)} MB
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="relative flex items-center gap-2">
@@ -3869,12 +3935,13 @@ function AddPrinterModal({
 }: {
   open: boolean
   onClose: () => void
-  onAdd: (printer: Partial<Printer> & { name: string; type: string; host?: string; apiKey?: string }) => Promise<void>
+  onAdd: (printer: Partial<Printer> & { name: string; type: string; host?: string; apiKey?: string; serialNumber?: string }) => Promise<void>
 }) {
   const [name, setName] = useState('')
   const [type, setType] = useState('klipper')
   const [host, setHost] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [serialNumber, setSerialNumber] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const inputClass =
@@ -3890,12 +3957,15 @@ function AddPrinterModal({
       setType('klipper')
       setHost('')
       setApiKey('')
+      setSerialNumber('')
       setError(null)
       setSaving(false)
     }
   }, [open])
 
   if (!open) return null
+
+  const isFlashforge = type === 'flashforge'
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -3904,13 +3974,24 @@ function AddPrinterModal({
       setError('Name and type are required')
       return
     }
+    if (isFlashforge && (!serialNumber || !apiKey)) {
+      setError('FlashForge printers require a serial number and check code')
+      return
+    }
     setSaving(true)
     try {
-      await onAdd({ name, type, host: host || undefined, apiKey: apiKey || undefined })
+      await onAdd({
+        name,
+        type,
+        host: host || undefined,
+        apiKey: apiKey || undefined,
+        serialNumber: serialNumber || undefined,
+      })
       setName('')
       setType('klipper')
       setHost('')
       setApiKey('')
+      setSerialNumber('')
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to add printer')
@@ -3940,26 +4021,46 @@ function AddPrinterModal({
             className={inputClass}
           >
             <option value="klipper">Klipper / Moonraker</option>
-            <option value="flashforge">FlashForge</option>
+            <option value="flashforge">FlashForge (AD5X / 5M / 5M Pro)</option>
             <option value="other">Other / Generic</option>
           </select>
           <input
             type="text"
-            placeholder="Host / IP (optional)"
+            placeholder={isFlashforge ? 'Printer IP (e.g. 192.168.1.42)' : 'Host / IP (optional)'}
             value={host}
             onChange={(e) => setHost(e.target.value)}
             className={`${inputClass} sensitive`}
           />
-          <input
-            type="text"
-            placeholder="API key (optional)"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            className={`${inputClass} sensitive`}
-          />
+          {isFlashforge ? (
+            <>
+              <input
+                type="text"
+                placeholder="Serial number (e.g. SNADVA5MXXXXX) *"
+                value={serialNumber}
+                onChange={(e) => setSerialNumber(e.target.value)}
+                className={`${inputClass} sensitive`}
+              />
+              <input
+                type="text"
+                placeholder="Check code (e.g. 12345) *"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className={`${inputClass} sensitive`}
+              />
+            </>
+          ) : (
+            <input
+              type="text"
+              placeholder="API key (optional)"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className={`${inputClass} sensitive`}
+            />
+          )}
           <p className="font-mono text-xs text-slate-500">
             For AnkerMake printers, log in via Settings to auto-discover.
             For Klipper, use the Moonraker URL (e.g. <code className="text-slate-400">http://192.168.1.50:7125</code>).
+            For FlashForge, enter the IP, serial number, and check code from the printer's Settings {'>'} Network/About screen.
           </p>
           {error && (
             <p className="rounded-lg border border-rose-600 bg-rose-950/30 p-3 font-mono text-sm text-rose-400">

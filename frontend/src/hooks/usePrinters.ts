@@ -41,7 +41,7 @@ export function usePrinters() {
   }, [refresh])
 
   const addPrinter = useCallback(
-    async (printer: Partial<Printer> & { type: string; name: string; host?: string; apiKey?: string }) => {
+    async (printer: Partial<Printer> & { type: string; name: string; host?: string; apiKey?: string; serialNumber?: string }) => {
       const res = await fetch('/api/printers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

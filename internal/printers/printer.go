@@ -42,6 +42,9 @@ type PrinterConfig struct {
 	Type   string `json:"type"`
 	Host   string `json:"host,omitempty"`
 	APIKey string `json:"apiKey,omitempty"`
+	// SerialNumber is used by FlashForge printers (AD5X / 5M / 5M Pro)
+	// for HTTP API authentication on port 8898.
+	SerialNumber string `json:"serialNumber,omitempty"`
 }
 
 // Driver is the common interface every printer provider must implement.
@@ -72,8 +75,10 @@ type Driver interface {
 	Extrude(ctx context.Context, amount float64, feedrate float64) error
 	// UploadGCode sends a G-code file to the printer. The filename is the
 	// user-facing name (e.g. "benchy.gcode") and data is the raw file content.
-	// Returns nil on success.
-	UploadGCode(ctx context.Context, filename string, data []byte) error
+	// progress, if non-nil, is called with the bytes sent so far and the total
+	// size as the transfer advances (drivers without chunked transfers may
+	// only call it once at the end). Returns nil on success.
+	UploadGCode(ctx context.Context, filename string, data []byte, progress func(sent, total int)) error
 	// StartPrint begins printing a file that has already been uploaded to
 	// the printer. The filename should match what was passed to UploadGCode.
 	StartPrint(ctx context.Context, filename string) error

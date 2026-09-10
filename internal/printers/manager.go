@@ -248,12 +248,12 @@ func (m *Manager) Extrude(ctx context.Context, id string, amount float64, feedra
 }
 
 // UploadGCode sends a G-code file to the requested printer.
-func (m *Manager) UploadGCode(ctx context.Context, id string, filename string, data []byte) error {
+func (m *Manager) UploadGCode(ctx context.Context, id string, filename string, data []byte, progress func(sent, total int)) error {
 	d := m.Find(id)
 	if d == nil {
 		return fmt.Errorf("printer not found: %s", id)
 	}
-	return d.UploadGCode(ctx, filename, data)
+	return d.UploadGCode(ctx, filename, data, progress)
 }
 
 // StartPrint begins printing a previously uploaded file on the requested printer.

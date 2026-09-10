@@ -12,6 +12,12 @@ interface QueueItem {
   startedAt?: number
   finishedAt?: number
   error?: string
+  transfer?: {
+    phase: string
+    percent: number
+    sent: number
+    total: number
+  }
 }
 
 export function PrintQueue() {
@@ -66,7 +72,13 @@ export function PrintQueue() {
 
   const startNow = async (id: string) => {
     try {
-      await fetch(`/api/queue/${encodeURIComponent(id)}`, { method: 'POST' })
+      const res = await fetch(`/api/queue/${encodeURIComponent(id)}`, { method: 'POST' })
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ error: 'Start failed' }))
+        window.dispatchEvent(new CustomEvent('openpolyprint-toast', {
+          detail: { type: 'error', message: d.error || 'Start failed' }
+        }))
+      }
       fetchQueue()
     } catch (e) {
       console.error(e)
@@ -86,6 +98,7 @@ export function PrintQueue() {
   const statusColor = (status: string) => {
     switch (status) {
       case 'printing': return 'text-blue-600 dark:text-blue-400'
+      case 'sending': return 'text-blue-600 dark:text-blue-400'
       case 'done': return 'text-emerald-600 dark:text-emerald-400'
       case 'failed': return 'text-rose-600 dark:text-rose-400'
       case 'skipped': return 'text-slate-400'
@@ -142,9 +155,29 @@ export function PrintQueue() {
                 {item.error && (
                   <p className="mt-1 font-mono text-xs text-rose-500">{item.error}</p>
                 )}
+                {item.transfer && (
+                  <div className="mt-2 w-full max-w-xs">
+                    <div className="mb-1 flex items-center justify-between font-mono text-[10px] text-slate-400">
+                      <span>
+                        {item.transfer.phase === 'connecting'
+                          ? 'Connecting to printer…'
+                          : item.transfer.phase === 'starting'
+                            ? 'Starting print…'
+                            : 'Sending G-code…'}
+                      </span>
+                      <span>{item.transfer.percent}%</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                        style={{ width: `${Math.min(100, item.transfer.percent)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               <span className={`font-mono text-xs font-medium capitalize ${statusColor(item.status)}`}>
-                {item.status}
+                {item.transfer ? 'sending' : item.status}
               </span>
               <div className="flex gap-1">
                 {item.status === 'pending' && (

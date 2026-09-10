@@ -144,7 +144,7 @@ func (d *Driver) Status() (printers.Status, error) {
 					TotalLayers int     `json:"total_layers"`
 					Height      float64 `json:"height"`
 					TotalHeight float64 `json:"total_height"`
-				} `json:"print_stats"` // may not always be present
+				} `json:"layer_info"` // custom object; may not always be present
 			} `json:"status"`
 		} `json:"result"`
 	}
@@ -279,7 +279,9 @@ func (d *Driver) Extrude(ctx context.Context, amount float64, feedrate float64) 
 }
 
 // UploadGCode uploads a G-code file to Moonraker's gcodes directory.
-func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+// Moonraker's upload is a single request, so progress is reported once at
+// completion.
+func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte, progress func(sent, total int)) error {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	part, err := writer.CreateFormFile("file", filepath.Base(filename))
@@ -310,6 +312,9 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upload failed: %d %s", resp.StatusCode, string(body))
+	}
+	if progress != nil {
+		progress(len(data), len(data))
 	}
 	return nil
 }

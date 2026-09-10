@@ -1230,6 +1230,18 @@ function ViewModal({ file, onClose, onRefresh, onConverted }: { file: ProfileFil
                 {/* Content display */}
                 {isJSON ? (
                   <div>
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="font-mono text-xs text-slate-500">
+                        OrcaSlicer JSON profile
+                      </p>
+                      <button
+                        onClick={handleSuggestEditsWholeFile}
+                        className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:from-blue-500 hover:to-purple-500"
+                        title="Get AI suggestions for this profile's settings and apply the ones you accept"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" /> AI Edits
+                      </button>
+                    </div>
                     <pre className="max-h-[60vh] overflow-auto rounded-lg bg-slate-900 p-4 font-mono text-xs text-slate-300">
                       {file.content}
                     </pre>
@@ -1340,7 +1352,8 @@ function ViewModal({ file, onClose, onRefresh, onConverted }: { file: ProfileFil
           onClose={() => { setAiEditorOpen(false); setAiEditorProfile(null) }}
           content={aiEditorProfile.content}
           profileName={aiEditorProfile.name}
-          profileType={aiEditorProfile.type}
+          profileType={aiEditorProfile.type === 'flat' && aiEditorProfile.content.trim().startsWith('{') ? 'orcaslicer json' : aiEditorProfile.type}
+          format={aiEditorProfile.content.trim().startsWith('{') ? 'json' : 'ini'}
           onSave={handleSaveFromAIEditor}
         />
       )}

@@ -106,7 +106,7 @@ func (d *StaticDriver) Extrude(ctx context.Context, amount float64, feedrate flo
 }
 
 // UploadGCode returns an error for the static driver.
-func (d *StaticDriver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+func (d *StaticDriver) UploadGCode(ctx context.Context, filename string, data []byte, progress func(sent, total int)) error {
 	return fmt.Errorf("not implemented for %s", d.cfg.Type)
 }
 

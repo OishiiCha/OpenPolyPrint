@@ -395,8 +395,9 @@ func (d *Driver) Extrude(ctx context.Context, amount float64, feedrate float64) 
 
 // UploadGCode sends a G-code file to the printer via the PPPP file transfer
 // protocol. If the PPPP LAN connection is not available, it attempts to
-// reconnect before returning an error.
-func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) error {
+// reconnect before returning an error. progress, if non-nil, receives the
+// bytes-sent count as each 32KB chunk is acknowledged.
+func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte, progress func(sent, total int)) error {
 	d.apiMu.Lock()
 	defer d.apiMu.Unlock()
 
@@ -411,6 +412,13 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 		}
 		log.Printf("[pppp] reconnected successfully to %s", d.printer.Name)
 	}
+
+	report := func(sent int) {
+		if progress != nil {
+			progress(sent, len(data))
+		}
+	}
+	report(0)
 
 	cleanName := pppp.SanitizeFilename(filename)
 	userID := "-"
@@ -437,6 +445,9 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 	const chunkSize = 32 * 1024
 	pos := uint32(0)
 	for pos < uint32(len(data)) {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("file upload cancelled at offset %d: %w", pos, err)
+		}
 		end := pos + chunkSize
 		if end > uint32(len(data)) {
 			end = uint32(len(data))
@@ -446,6 +457,7 @@ func (d *Driver) UploadGCode(ctx context.Context, filename string, data []byte) 
 			return fmt.Errorf("file upload data at offset %d: %w", pos, err)
 		}
 		pos = end
+		report(int(pos))
 	}
 
 	// Step 4: Send FTEnd to complete the transfer (this also starts the print).

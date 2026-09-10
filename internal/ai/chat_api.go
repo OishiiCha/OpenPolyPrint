@@ -219,28 +219,38 @@ type ProfileSuggestion struct {
 }
 
 // SuggestProfileEdits asks Gemini to analyze a profile and return structured
-// suggestions for improving settings. Returns a list of specific setting changes.
-func SuggestProfileEdits(apiKey, profileContent, profileName, profileType string) ([]ProfileSuggestion, string, error) {
+// suggestions for improving settings. profileFormat selects the syntax of the
+// suggestions: "json" (OrcaSlicer/BambuStudio .json profiles) or anything
+// else for INI-style profiles. Returns a list of specific setting changes.
+func SuggestProfileEdits(apiKey, profileContent, profileName, profileType, profileFormat string) ([]ProfileSuggestion, string, error) {
 	if apiKey == "" {
 		return nil, "", fmt.Errorf("API key required")
+	}
+
+	keyRule := `- "key": the exact setting key from the INI file`
+	valueRule := `- "currentValue"/"suggestedValue": the values as strings, using INI syntax (e.g. 0.2, PLA, true)`
+	metaRule := `Do not suggest changes to meta keys like "inherits", "from", "version", "print_settings_id", etc.`
+	if profileFormat == "json" {
+		keyRule = `- "key": the exact top-level JSON property name from the profile file`
+		valueRule = `- "currentValue"/"suggestedValue": the values as strings, using JSON syntax for suggestedValue (numbers unquoted, booleans as true/false, strings quoted, arrays in brackets — e.g. 0.2, true, "PLA", [0.2, 0.2])`
+		metaRule = `Do not suggest changes to meta keys like "name", "from", "inherits", "version", "printer_settings_id", "print_settings_id", "filament_settings_id", or any "*_settings_id" keys.`
 	}
 
 	systemPrompt := fmt.Sprintf(`You are a 3D printing expert. Analyze the following %s slicer profile named "%s" and suggest specific setting changes to improve print quality, speed, reliability, or material performance.
 
 Return your response as a JSON array of suggested edits. Each edit must have:
-- "key": the exact setting key from the INI file
-- "currentValue": the current value as a string
-- "suggestedValue": your suggested new value as a string
+%s
+%s
 - "reason": a brief explanation of why this change is recommended
 - "category": "print", "filament", or "printer"
 
-Only suggest changes that are meaningful improvements. Do not suggest changes to meta keys like "inherits", "from", "version", "print_settings_id", etc.
+Only suggest changes that are meaningful improvements. %s
 If the profile is already well-optimized, return an empty array [].
 
 Respond with ONLY the JSON array, no markdown formatting or explanation.
 
 Profile content:
-%s`, profileType, profileName, profileContent)
+%s`, profileType, profileName, keyRule, valueRule, metaRule, profileContent)
 
 	type geminiReq struct {
 		Contents         []ChatMessageForAPI `json:"contents"`

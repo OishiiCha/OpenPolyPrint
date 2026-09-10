@@ -28,10 +28,24 @@ interface AIProfileEditorProps {
   content: string
   profileName: string
   profileType: string
+  /** Content syntax: 'json' for OrcaSlicer/BambuStudio profiles, 'ini' (default) otherwise. */
+  format?: 'ini' | 'json'
   onSave: (newContent: string, newName: string, opts?: {
     overwrite?: boolean
     clearInherits?: boolean
   }) => Promise<void>
+}
+
+// parseJsonValue turns an AI-suggested value into a JSON value: numbers,
+// booleans, arrays and quoted strings become real JSON types; anything else
+// stays a string.
+function parseJsonValue(raw: string): unknown {
+  const t = raw.trim()
+  try {
+    return JSON.parse(t)
+  } catch {
+    return t.replace(/^"|"$/g, '')
+  }
 }
 
 export function AIProfileEditor({
@@ -40,6 +54,7 @@ export function AIProfileEditor({
   content,
   profileName,
   profileType,
+  format = 'ini',
   onSave,
 }: AIProfileEditorProps) {
   const [loading, setLoading] = useState(false)
@@ -91,6 +106,7 @@ export function AIProfileEditor({
           content,
           profileName,
           profileType,
+          profileFormat: format,
         }),
       })
       if (!res.ok) {
@@ -132,6 +148,19 @@ export function AIProfileEditor({
 
   // Build the modified content by applying accepted suggestions
   const getModifiedContent = (): string => {
+    if (format === 'json') {
+      // Patch the JSON object directly and re-serialize
+      try {
+        const obj = JSON.parse(content) as Record<string, unknown>
+        for (let i = 0; i < suggestions.length; i++) {
+          if (!accepted.has(i)) continue
+          obj[suggestions[i].key] = parseJsonValue(suggestions[i].suggestedValue)
+        }
+        return JSON.stringify(obj, null, 2)
+      } catch {
+        return content
+      }
+    }
     let modified = content
     for (let i = 0; i < suggestions.length; i++) {
       if (!accepted.has(i)) continue
@@ -387,31 +416,33 @@ export function AIProfileEditor({
         {/* Footer with save */}
         {!loading && !saved && suggestions.length > 0 && (
           <div className="border-t border-slate-800 px-6 py-4">
-            {/* eufyMake import options */}
-            <div className="mb-3 flex flex-wrap gap-4">
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={overwrite}
-                  onChange={(e) => setOverwrite(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-xs text-slate-300" title="Keep the original section name so eufyMake replaces the existing profile on import">
-                  Overwrite existing
-                </span>
-              </label>
-              <label className="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={clearInherits}
-                  onChange={(e) => setClearInherits(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-xs text-slate-300" title="Remove the inherits field so the profile is standalone">
-                  Standalone (clear inherits)
-                </span>
-              </label>
-            </div>
+            {/* eufyMake import options (INI profiles only) */}
+            {format !== 'json' && (
+              <div className="mb-3 flex flex-wrap gap-4">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={overwrite}
+                    onChange={(e) => setOverwrite(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-xs text-slate-300" title="Keep the original section name so eufyMake replaces the existing profile on import">
+                    Overwrite existing
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={clearInherits}
+                    onChange={(e) => setClearInherits(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-xs text-slate-300" title="Remove the inherits field so the profile is standalone">
+                    Standalone (clear inherits)
+                  </span>
+                </label>
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <input
                 type="text"

@@ -164,14 +164,82 @@ func (s *Store) Load(id string) ([]byte, error) {
 	return data, nil
 }
 
-// FilePath returns the on-disk path for a G-code file by ID.
-func (s *Store) FilePath(id string) string {
+// baseName resolves a file ID to its on-disk base filename.
+func baseName(id string) string {
 	name, err := url.PathUnescape(id)
 	if err != nil {
 		name = id
 	}
-	base := filepath.Base(name)
-	return filepath.Join(s.dir, base)
+	return filepath.Base(name)
+}
+
+// FilePath returns the on-disk path for a G-code file by ID.
+func (s *Store) FilePath(id string) string {
+	return filepath.Join(s.dir, baseName(id))
+}
+
+// SetPrinter assigns (or unassigns, when printerID is empty) a printer to a
+// stored G-code file and returns the updated entry.
+func (s *Store) SetPrinter(id, printerID string) (File, error) {
+	base := baseName(id)
+	path := filepath.Join(s.dir, base)
+	if _, err := os.Stat(path); err != nil {
+		return File{}, fmt.Errorf("not found: %s", base)
+	}
+	meta, err := s.loadMeta()
+	if err != nil {
+		return File{}, err
+	}
+	entry := meta[base]
+	entry.PrinterID = printerID
+	meta[base] = entry
+	if err := s.saveMeta(meta); err != nil {
+		return File{}, err
+	}
+	return s.fileToEntry(path, meta)
+}
+
+// Rename renames a stored G-code file, carrying its metadata (printer
+// assignment) over to the new name. Returns the updated entry.
+func (s *Store) Rename(id, newName string) (File, error) {
+	oldBase := baseName(id)
+	oldPath := filepath.Join(s.dir, oldBase)
+	if _, err := os.Stat(oldPath); err != nil {
+		return File{}, fmt.Errorf("not found: %s", oldBase)
+	}
+	newBase := filepath.Base(strings.TrimSpace(newName))
+	if newBase == "" || newBase == "." || strings.HasPrefix(newBase, "..") {
+		return File{}, fmt.Errorf("invalid name")
+	}
+	// Keep the original extension when the new name has none (e.g. renaming
+	// "benchy.gcode" to "benchy-v2" should stay a .gcode file).
+	if filepath.Ext(newBase) == "" {
+		newBase += filepath.Ext(oldBase)
+	}
+	if newBase == oldBase {
+		meta, err := s.loadMeta()
+		if err != nil {
+			return File{}, err
+		}
+		return s.fileToEntry(oldPath, meta)
+	}
+	newPath := filepath.Join(s.dir, newBase)
+	if _, err := os.Stat(newPath); err == nil {
+		return File{}, fmt.Errorf("a file named %s already exists", newBase)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return File{}, fmt.Errorf("rename: %w", err)
+	}
+	meta, err := s.loadMeta()
+	if err != nil {
+		return File{}, err
+	}
+	meta[newBase] = meta[oldBase]
+	delete(meta, oldBase)
+	if err := s.saveMeta(meta); err != nil {
+		return File{}, err
+	}
+	return s.fileToEntry(newPath, meta)
 }
 
 // Timeline parses a G-code file and returns timestamped segments for
@@ -186,11 +254,7 @@ func (s *Store) Timeline(id string) ([]Segment, error) {
 
 // Delete removes a G-code file by id (filename).
 func (s *Store) Delete(id string) error {
-	name, err := url.PathUnescape(id)
-	if err != nil {
-		name = id
-	}
-	base := filepath.Base(name)
+	base := baseName(id)
 	path := filepath.Join(s.dir, base)
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("remove file: %w", err)
