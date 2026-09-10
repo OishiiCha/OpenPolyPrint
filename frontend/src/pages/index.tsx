@@ -284,21 +284,21 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                 </h3>
                 <button
                   onClick={() => setRenameOpen(true)}
-                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-blue-500 group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-slate-400 transition-opacity hover:text-blue-500"
                   title="Rename printer"
                 >
                   <SettingsIcon className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => setEditOpen(true)}
-                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-blue-500 group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-slate-400 transition-opacity hover:text-blue-500"
                   title="Edit printer"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => setDeleteConfirm(true)}
-                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-slate-400 transition-opacity hover:text-rose-500"
                   title="Delete printer"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
