@@ -28,6 +28,7 @@ import {
   Maximize2,
   MoreVertical,
   Pause,
+  Pencil,
   Play,
   Plus,
   Printer as PrinterIcon,
@@ -214,9 +215,12 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
   const [recordModalOpen, setRecordModalOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [aiAnalyzeOpen, setAiAnalyzeOpen] = useState(false)
   const [recordStatus, setRecordStatus] = useState<{ recording: boolean; timelapse: boolean; hasCamera: boolean; session: boolean } | null>(null)
-  const { renamePrinter } = usePrinters()
+  const { renamePrinter, removePrinter } = usePrinters()
 
   // Poll recording status
   useEffect(() => {
@@ -284,6 +288,20 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
                   title="Rename printer"
                 >
                   <SettingsIcon className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-blue-500 group-hover:opacity-100"
+                  title="Edit printer"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm(true)}
+                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-rose-500 group-hover:opacity-100"
+                  title="Delete printer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">{printer.type}</p>
@@ -804,6 +822,60 @@ function PrinterCard({ printer, onOpen, camera, allCameras }: { printer: Printer
         />,
         document.body
       )}
+
+      {/* Edit printer modal */}
+      {editOpen && createPortal(
+        <EditPrinterModal
+          printer={printer}
+          onClose={() => setEditOpen(false)}
+        />,
+        document.body
+      )}
+
+      {/* Delete printer confirmation */}
+      {deleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={() => !deleting && setDeleteConfirm(false)}>
+          <div
+            className="dark w-full max-w-sm rounded-none border-2 border-slate-700 border-t-4 border-t-rose-500 bg-slate-950 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="mb-2 font-mono text-lg font-semibold text-rose-400">[ delete_printer ]</h2>
+            <p className="mb-4 text-sm text-slate-300">
+              Remove <span className="font-semibold text-white">{printer.name}</span> from OpenPolyPrint?
+              This only removes it from the app — it does not affect the printer itself.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeleteConfirm(false)}
+                className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true)
+                  try {
+                    await removePrinter(printer.id)
+                    setDeleteConfirm(false)
+                  } catch {
+                    // ignore — the hook will surface errors via refresh
+                  } finally {
+                    setDeleting(false)
+                  }
+                }}
+                className="rounded-lg bg-rose-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+              >
+                {deleting ? 'deleting...' : 'delete'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   )
 }
@@ -874,6 +946,128 @@ function RenamePrinterModal({ printer, onClose, onRename }: { printer: Printer; 
               reset
             </button>
           )}
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function EditPrinterModal({ printer, onClose }: { printer: Printer; onClose: () => void }) {
+  const { updatePrinter } = usePrinters()
+  const [name, setName] = useState(printer.name)
+  const [host, setHost] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [serialNumber, setSerialNumber] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const inputClass =
+    'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500'
+
+  // Fetch current config from the backend (the Printer status object doesn't
+  // carry host/serialNumber/apiKey). We use the printer type to decide which
+  // fields to show, and prefill what we can.
+  const isFlashforge = printer.type === 'flashforge'
+  const isKlipper = printer.type === 'klipper'
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSaving(true)
+    try {
+      await updatePrinter(printer.id, {
+        name: name.trim() || undefined,
+        host: host || undefined,
+        apiKey: apiKey || undefined,
+        serialNumber: serialNumber || undefined,
+      })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update printer')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4" onClick={onClose}>
+      <form
+        className="dark w-full max-w-md max-h-[90vh] overflow-y-auto rounded-none border-2 border-slate-700 border-t-4 border-t-blue-500 bg-slate-950 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <h2 className="mb-4 font-mono text-lg font-semibold text-blue-400">[ edit_printer ]</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1 block font-mono text-xs text-slate-400">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Printer name"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block font-mono text-xs text-slate-400">
+              {isKlipper ? 'Moonraker URL' : 'Host / IP'}
+            </label>
+            <input
+              type="text"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder={isKlipper ? 'http://192.168.1.50:7125' : '192.168.1.42'}
+              className={`${inputClass} sensitive`}
+            />
+          </div>
+          {isFlashforge && (
+            <div>
+              <label className="mb-1 block font-mono text-xs text-slate-400">Serial Number</label>
+              <input
+                type="text"
+                value={serialNumber}
+                onChange={(e) => setSerialNumber(e.target.value)}
+                placeholder="SNADVA5MXXXXX"
+                className={`${inputClass} sensitive`}
+              />
+            </div>
+          )}
+          <div>
+            <label className="mb-1 block font-mono text-xs text-slate-400">
+              {isFlashforge ? 'Check Code' : 'API Key'}
+            </label>
+            <input
+              type="text"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={isFlashforge ? '12345' : '(optional)'}
+              className={`${inputClass} sensitive`}
+            />
+          </div>
+          <p className="font-mono text-xs text-slate-500">
+            Leave fields blank to keep the current value. Only manual printers
+            (Klipper, FlashForge, Other) can be edited here.
+          </p>
+          {error && (
+            <p className="rounded-lg border border-rose-600 bg-rose-950/30 p-3 font-mono text-sm text-rose-400">
+              {error}
+            </p>
+          )}
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-slate-800 px-4 py-2 font-mono text-sm font-medium text-slate-300 hover:bg-slate-700"
+            >
+              cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-lg bg-blue-600 px-4 py-2 font-mono text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+            >
+              {saving ? 'saving...' : 'save'}
+            </button>
+          </div>
         </div>
       </form>
     </div>

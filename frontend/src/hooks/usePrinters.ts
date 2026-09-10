@@ -84,5 +84,21 @@ export function usePrinters() {
     [refresh]
   )
 
-  return { printers, loading, error, refresh, addPrinter, removePrinter, renamePrinter }
+  const updatePrinter = useCallback(
+    async (id: string, updates: { name?: string; host?: string; apiKey?: string; serialNumber?: string }) => {
+      const res = await fetch(`/api/printers/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (!res.ok) {
+        const msg = await res.text().catch(() => 'failed to update printer')
+        throw new Error(msg)
+      }
+      refresh()
+    },
+    [refresh]
+  )
+
+  return { printers, loading, error, refresh, addPrinter, removePrinter, renamePrinter, updatePrinter }
 }

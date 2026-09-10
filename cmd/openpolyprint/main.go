@@ -4614,14 +4614,48 @@ echo "  4. Run 'Sync Now' to test the connection"
 		id := r.PathValue("id")
 		switch r.Method {
 		case http.MethodPut, http.MethodPatch:
-			// Rename printer (set custom alias)
 			var body struct {
-				Name string `json:"name"`
+				Name         string `json:"name"`
+				Host         string `json:"host"`
+				APIKey       string `json:"apiKey"`
+				SerialNumber string `json:"serialNumber"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 				return
 			}
+			// Update manual printer config fields if this is a manual printer.
+			updated := false
+			for i := range manualPrinters {
+				if manualPrinters[i].ID == id {
+					if body.Host != "" {
+						manualPrinters[i].Host = body.Host
+					}
+					if body.APIKey != "" {
+						manualPrinters[i].APIKey = body.APIKey
+					}
+					if body.SerialNumber != "" {
+						manualPrinters[i].SerialNumber = body.SerialNumber
+					}
+					updated = true
+					break
+				}
+			}
+			if updated {
+				if err := saveManualPrinters(filepath.Join(settingsDir, "printers.json"), manualPrinters); err != nil {
+					http.Error(w, `{"error":"failed to save printer"}`, http.StatusInternalServerError)
+					return
+				}
+				mgr.Store(buildManager(cfg))
+				go func() {
+					m := mgr.Load()
+					if m != nil {
+						_ = m.ConnectAll(context.Background())
+						m.Watchdog(context.Background())
+					}
+				}()
+			}
+			// Set / clear the display alias.
 			printerAliasesMu.Lock()
 			if printerAliases == nil {
 				printerAliases = map[string]string{}
